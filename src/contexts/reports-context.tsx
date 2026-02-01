@@ -1,0 +1,72 @@
+"use client";
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+
+export type ReportStatus = "generating" | "done" | "failed";
+
+export interface ReportItem {
+  id: string;
+  title: string;
+  date: string;
+  duration: string;
+  status: ReportStatus;
+  createdAt: number;
+}
+
+interface ReportsContextValue {
+  reports: ReportItem[];
+  addReport: (report: Omit<ReportItem, "createdAt">) => void;
+  updateReportStatus: (id: string, status: ReportStatus) => void;
+  getGeneratingReports: () => ReportItem[];
+}
+
+const ReportsContext = createContext<ReportsContextValue | null>(null);
+
+export function ReportsProvider({ children }: { children: ReactNode }) {
+  const [reports, setReports] = useState<ReportItem[]>([]);
+
+  const addReport = useCallback((report: Omit<ReportItem, "createdAt">) => {
+    setReports((prev) => [
+      { ...report, createdAt: Date.now() },
+      ...prev,
+    ]);
+  }, []);
+
+  const updateReportStatus = useCallback((id: string, status: ReportStatus) => {
+    setReports((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, status } : r))
+    );
+  }, []);
+
+  const getGeneratingReports = useCallback(
+    () => reports.filter((r) => r.status === "generating"),
+    [reports]
+  );
+
+  const value = useMemo(
+    () => ({
+      reports,
+      addReport,
+      updateReportStatus,
+      getGeneratingReports,
+    }),
+    [reports, addReport, updateReportStatus, getGeneratingReports]
+  );
+
+  return (
+    <ReportsContext.Provider value={value}>{children}</ReportsContext.Provider>
+  );
+}
+
+export function useReports() {
+  const ctx = useContext(ReportsContext);
+  if (!ctx) throw new Error("useReports must be used within ReportsProvider");
+  return ctx;
+}
