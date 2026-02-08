@@ -3,15 +3,16 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { useSupabaseClient } from "@/lib/supabase/use-client";
 import type { User } from "@supabase/supabase-js";
 
 export default function LoginPage() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
+  const supabase = useSupabaseClient();
 
   useEffect(() => {
+    if (!supabase) return;
     const getInitialSession = async () => {
       const {
         data: { session },
@@ -27,9 +28,10 @@ export default function LoginPage() {
       setUser(session?.user ?? null);
     });
     return () => subscription.unsubscribe();
-  }, []);
+  }, [supabase]);
 
   const handleKakaoLogin = async () => {
+    if (!supabase) return;
     const origin =
       typeof window !== "undefined" ? window.location.origin : "";
     await supabase.auth.signInWithOAuth({
@@ -44,10 +46,10 @@ export default function LoginPage() {
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    if (supabase) await supabase.auth.signOut();
   };
 
-  if (loading) {
+  if (loading || !supabase) {
     return (
       <main
         className="min-h-screen flex flex-col items-center justify-center px-6"
