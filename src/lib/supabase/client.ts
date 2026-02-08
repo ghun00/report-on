@@ -10,13 +10,13 @@ let client: SupabaseClient | null = null;
 export function createClient(): SupabaseClient {
   if (!client) {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_KEY;
-    if (!url || !key) {
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON;
+    if (!url || !anon) {
       throw new Error(
-        "NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_KEY are required."
+        "NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON are required."
       );
     }
-    client = createBrowserClient(url, key);
+    client = createBrowserClient(url, anon);
   }
   return client;
 }

@@ -24,7 +24,7 @@
 
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_KEY=your-anon-key
+NEXT_PUBLIC_SUPABASE_ANON=your-anon-key
 ```
 
 Supabase Dashboard → Project Settings → API에서 확인할 수 있습니다.
@@ -46,7 +46,7 @@ Supabase Dashboard → Project Settings → API에서 확인할 수 있습니다
 
 ## 실행 방법
 
-1. `.env.local`에 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_KEY` 설정
+1. `.env.local`에 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON` 설정
 2. `npm run dev` 실행
 3. 브라우저에서 `/login` 접속
 4. **카카오로 시작하기** 클릭 → 카카오 로그인 → 콜백 후 `/home`으로 이동되는지 확인
