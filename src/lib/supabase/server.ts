@@ -4,9 +4,16 @@ import { cookies } from "next/headers";
 export async function createClient() {
   const cookieStore = await cookies();
 
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON!,
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON ??
+    process.env.NEXT_PUBLIC_SUPABASE_KEY;
+  if (!url || !anon) {
+    throw new Error(
+      "NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON (or NEXT_PUBLIC_SUPABASE_KEY) are required."
+    );
+  }
+  return createServerClient(url, anon,
     {
       cookies: {
         getAll() {
