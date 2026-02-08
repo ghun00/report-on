@@ -3,11 +3,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { Noto_Sans_KR } from "next/font/google";
-import Image from "next/image";
 import Link from "next/link";
-import Sidebar from "@/components/sidebar";
+import TopBar from "@/components/topbar";
 import MobileDrawer from "@/components/mobiledrawer";
-import { Menu, X, Link2, Check, ArrowLeft, List } from "lucide-react";
+import { Link2, Check, ArrowLeft, List } from "lucide-react";
 
 const notoSansKr = Noto_Sans_KR({
   subsets: ["latin"],
@@ -84,17 +83,16 @@ interface ReportTOCProps {
   sections: (typeof DUMMY_REPORT)["sections"];
   activeId: string | null;
   onNav: (id: string) => void;
-  fontClassName: string;
+  fontClassName?: string;
 }
 
-function ReportTOC({ meta, sections, activeId, onNav, fontClassName }: ReportTOCProps) {
+function ReportTOC({ meta, sections, activeId, onNav, fontClassName = "" }: ReportTOCProps) {
   return (
     <aside
       className={`hidden lg:block w-[220px] shrink-0 ${fontClassName}`}
       aria-label="목차"
     >
-      <div className="sticky top-8">
-        
+      <div className="sticky top-[12rem]">
         {/* 목차 리스트 */}
         <nav className="flex flex-col gap-1">
           {sections.map((s) => {
@@ -125,10 +123,10 @@ interface MobileTOCModalProps {
   sections: (typeof DUMMY_REPORT)["sections"];
   activeId: string | null;
   onNav: (id: string) => void;
-  fontClassName: string;
+  fontClassName?: string;
 }
 
-function MobileTOCModal({ isOpen, onClose, sections, activeId, onNav, fontClassName }: MobileTOCModalProps) {
+function MobileTOCModal({ isOpen, onClose, sections, activeId, onNav, fontClassName = "" }: MobileTOCModalProps) {
   const handleNav = (id: string) => {
     onNav(id);
     onClose();
@@ -233,42 +231,12 @@ export default function ReportDetailPage() {
   const r = DUMMY_REPORT;
 
   return (
-    <div className={`min-h-screen bg-[#F6F7F9] flex ${notoSansKr.className}`}>
-      <Sidebar className="hidden lg:flex" />
+    <div className="min-h-screen bg-[#F6F7F9] flex flex-col">
+      <TopBar onMenuClick={() => setIsDrawerOpen(true)} />
 
-      <main className="flex-1 lg:ml-[272px] min-h-screen">
-        {/* 모바일 헤더 */}
-        <div className="lg:hidden sticky top-0 z-30 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
-          <Link href="/storage" className="flex items-center">
-            <Image
-              src="/logo.png"
-              alt="레포트온"
-              width={96}
-              height={24}
-              className="h-6 w-auto"
-              priority
-            />
-          </Link>
-          <button
-            onClick={() => setIsDrawerOpen(!isDrawerOpen)}
-            className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors relative"
-            aria-label={isDrawerOpen ? "메뉴 닫기" : "메뉴 열기"}
-          >
-            <Menu
-              className={`w-6 h-6 text-gray-700 absolute transition-all duration-300 ${
-                isDrawerOpen ? "opacity-0 rotate-90 scale-0" : "opacity-100 rotate-0 scale-100"
-              }`}
-            />
-            <X
-              className={`w-6 h-6 text-gray-700 absolute transition-all duration-300 ${
-                isDrawerOpen ? "opacity-100 rotate-0 scale-100" : "opacity-0 rotate-90 scale-0"
-              }`}
-            />
-          </button>
-        </div>
-
-        {/* 상단 바: 뒤로가기 | URL 복사 (Surfit 스타일, 보고서 바깥) */}
-        <div className="sticky top-16 lg:top-0 z-20 flex items-center justify-between px-4 lg:px-8 xl:px-12 py-3 bg-white/10 backdrop-blur-md">
+      <main className="flex-1 min-h-screen flex flex-col">
+        {/* 섹션 1: 뒤로가기, 링크 복사하기 (TopBar 하단에 sticky) */}
+        <div className="sticky top-14 lg:top-16 z-20 flex shrink-0 items-center justify-between px-4 lg:px-8 xl:px-12 py-3 bg-[#F6F7F9] border-b border-gray-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <Link
             href="/storage"
             className="inline-flex items-center gap-1.5 text-[16px] text-[#666] hover:text-[#1A1A1A] transition-colors"
@@ -285,11 +253,12 @@ export default function ReportDetailPage() {
           </button>
         </div>
 
-        {/* Surfit 스타일: 메인 문서 + 우측 TOC */}
-        <div className="px-4 lg:px-8 xl:px-12 py-8 lg:py-12 max-w-[1440px] mx-auto">
-          <div className="flex gap-10 lg:gap-12 justify-center">
-          {/* 메인 문서 카드 */}
-          <article className="w-full max-w-[880px] bg-white rounded-[14px] px-6 lg:px-12 py-8 lg:py-12" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }} data-report-id={reportId}>
+        {/* 섹션 2: 상담 보고서 + 목차 */}
+        <div className="flex-1 px-4 lg:px-8 xl:px-12 py-8 lg:py-12">
+          <div className="max-w-[1440px] mx-auto">
+            <div className="flex gap-10 lg:gap-12 justify-center">
+          {/* 메인 문서 카드 (보고서 영역만 Noto Sans KR) */}
+          <article className={`w-full max-w-[880px] bg-white rounded-[14px] px-6 lg:px-12 py-8 lg:py-12 ${notoSansKr.className}`} style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }} data-report-id={reportId}>
             {/* 헤더 */}
             <header className="mb-8">
               <div className="mb-2">
@@ -380,7 +349,7 @@ export default function ReportDetailPage() {
             ))}
           </article>
 
-          {/* 우측 TOC */}
+          {/* 우측 목차 (보고서와 같은 수직선, 스크롤 시 sticky) */}
           <ReportTOC
             meta={r.meta}
             sections={r.sections}
@@ -388,13 +357,14 @@ export default function ReportDetailPage() {
             onNav={handleTocNav}
             fontClassName={notoSansKr.className}
           />
+            </div>
           </div>
         </div>
       </main>
 
       <MobileDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
       
-      {/* 모바일 목차 모달 */}
+      {/* 모바일 목차 모달 (보고서 영역) */}
       <MobileTOCModal
         isOpen={isTOCModalOpen}
         onClose={() => setIsTOCModalOpen(false)}

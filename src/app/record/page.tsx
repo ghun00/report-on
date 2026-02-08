@@ -3,7 +3,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import TossStyleAlert from "@/components/ui/tossalert";
-import { useReports } from "@/contexts/reports-context";
+import { createClient } from "@/lib/supabase/client";
+import {
+  createReportRow,
+  updateReportAfterUpload,
+  updateReportFailed,
+} from "@/lib/supabase/reports";
+import { uploadRecordingBlob } from "@/lib/supabase/upload-recording";
 import { Pause, Play } from "lucide-react";
 
 type RecordingState = "recording" | "paused" | "phaseA" | "aiWorking" | "error";
@@ -125,7 +131,6 @@ function formatTime(seconds: number): string {
 // ─── 메인 녹음 페이지 ───────────────────────────────────────────────────────
 export default function RecordPage() {
   const router = useRouter();
-  const { addReport } = useReports();
   const [state, setState] = useState<RecordingState>("recording");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -223,17 +228,6 @@ export default function RecordPage() {
     });
   }, [stopTimer]);
 
-  // ─── 업로드 (더미) ────────────────────────────────────────────────────────
-  const uploadRecording = useCallback(async (blob: Blob): Promise<string> => {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    return `rpt_${Date.now()}`;
-  }, []);
-
-  // ─── 보고서 생성 요청 (더미) ─────────────────────────────────────────────
-  const requestReportGeneration = useCallback(async (reportId: string) => {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }, []);
-
   // ─── 초기 녹음 시작 ──────────────────────────────────────────────────────
   useEffect(() => {
     startRecording();
@@ -275,7 +269,6 @@ export default function RecordPage() {
   const runSaveAndGoToAiWorking = useCallback(
     async (blob: Blob) => {
       lastFailedBlobRef.current = blob;
-      const durationStr = formatTime(elapsedSeconds);
       const dateStr = new Date().toLocaleDateString("ko-KR", {
         year: "numeric",
         month: "2-digit",
@@ -283,21 +276,33 @@ export default function RecordPage() {
       }).replace(/\. /g, ".").trim();
       const title = `상담 보고서 ${dateStr}`;
 
-      try {
-        const id = await uploadRecording(blob);
-        addReport({
-          id,
-          title,
-          date: dateStr,
-          duration: durationStr,
-          status: "generating",
-        });
-        setState("aiWorking");
-      } catch {
+      const createResult = await createReportRow({
+        title,
+        durationSec: elapsedSeconds,
+        status: "uploading",
+      });
+      if (!createResult.success || !createResult.id) {
         setState("error");
+        return;
       }
+      const reportId = createResult.id;
+
+      const supabase = createClient();
+      const audioPath = await uploadRecordingBlob(supabase, reportId, blob);
+      if (!audioPath) {
+        await updateReportFailed(reportId);
+        setState("error");
+        return;
+      }
+      const updateResult = await updateReportAfterUpload(reportId, audioPath);
+      if (!updateResult.success) {
+        await updateReportFailed(reportId);
+        setState("error");
+        return;
+      }
+      setState("aiWorking");
     },
-    [elapsedSeconds, uploadRecording, addReport]
+    [elapsedSeconds]
   );
 
   const handleFinishConfirm = useCallback(() => {

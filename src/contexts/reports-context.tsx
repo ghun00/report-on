@@ -8,8 +8,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { ReportStatus } from "@/lib/constants/reports";
 
-export type ReportStatus = "generating" | "done" | "failed";
+export type { ReportStatus };
 
 export interface ReportItem {
   id: string;
@@ -46,7 +47,10 @@ export function ReportsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const getGeneratingReports = useCallback(
-    () => reports.filter((r) => r.status === "generating"),
+    () =>
+      reports.filter(
+        (r) => r.status === "generating" || r.status === "uploading"
+      ),
     [reports]
   );
 

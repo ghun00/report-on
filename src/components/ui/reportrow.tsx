@@ -13,6 +13,7 @@ export interface ReportRowProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 const STATUS_LABEL: Record<ReportStatus, string> = {
+  uploading: "업로드 중",
   generating: "생성중",
   done: "완료",
   failed: "실패",
@@ -27,7 +28,7 @@ export default function ReportRow({
   className,
   ...props
 }: ReportRowProps) {
-  const isGenerating = status === "generating";
+  const isGenerating = status === "generating" || status === "uploading";
 
   // 녹음 아이콘 (작은 바 형태)
   const RecordIcon = () => (
@@ -70,13 +71,13 @@ export default function ReportRow({
         <span
           className={cn(
             "text-[12px] sm:text-[13px] font-medium px-2 py-0.5 rounded-[99px]",
-            status === "generating" &&
+            (status === "generating" || status === "uploading") &&
               "bg-[#FFF5F0] text-[#F05705]",
             status === "done" && "bg-[#E8F5E9] text-[#2E7D32]",
             status === "failed" && "bg-[#FFEBEE] text-[#C62828]"
           )}
         >
-          {status === "generating" && (
+          {(status === "generating" || status === "uploading") && (
             <span className="inline-flex items-center gap-1">
               <Loader2 className="w-3 h-3 animate-spin" />
               {STATUS_LABEL[status]}

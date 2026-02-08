@@ -2,35 +2,20 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
-import Sidebar from "@/components/sidebar";
+import TopBar from "@/components/topbar";
 import MobileDrawer from "@/components/mobiledrawer";
 import ActionCard from "@/components/ui/actioncard";
 import StatCard from "@/components/ui/statcard";
 import ReportRow from "@/components/ui/reportrow";
 import TossStyleAlert from "@/components/ui/tossalert";
-import { useReports } from "@/contexts/reports-context";
-import { Mic, Upload, Menu, X, Loader2 } from "lucide-react";
+import { useReportsFromDb } from "@/lib/supabase/fetch-reports";
+import { createTestReportRow } from "@/lib/supabase/reports";
+import { Mic, Upload, Loader2 } from "lucide-react";
 
-// 더미 데이터
 const DUMMY_USER_NAME = "한지훈";
-const DUMMY_MONTHLY_TIME = 240; // 디자인에 맞춰 240으로 변경
+const DUMMY_MONTHLY_TIME = 240;
 const DUMMY_MONTHLY_COUNT = 6;
-const DUMMY_RECENT_REPORTS = [
-  {
-    id: "rpt_1",
-    title: "2026년 1월 6일 상담 보고서",
-    date: "2026.10.24",
-    duration: "01:20:33",
-  },
-  {
-    id: "rpt_2",
-    title: "2026년 1월 6일 상담 보고서",
-    date: "2026.10.24",
-    duration: "01:20:33",
-  },
-];
 
 // 녹음 아이콘 (바 형태)
 const RecordingIcon = () => (
@@ -54,10 +39,13 @@ const UploadIcon = () => (
 
 export default function HomePage() {
   const router = useRouter();
-  const { getGeneratingReports } = useReports();
-  const generatingReports = getGeneratingReports();
+  const { reports, isLoading, error, refetch } = useReportsFromDb();
+  const generatingReports = reports.filter(
+    (r) => r.status === "generating" || r.status === "uploading"
+  );
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [showMicAlert, setShowMicAlert] = useState(false);
+  const [testReportMessage, setTestReportMessage] = useState<string | null>(null);
 
   const handleStartRecording = async () => {
     try {
@@ -78,43 +66,19 @@ export default function HomePage() {
     console.log("파일 업로드");
   };
 
+  const handleTestReportCreate = async () => {
+    setTestReportMessage(null);
+    const result = await createTestReportRow();
+    setTestReportMessage(result.success ? "생성됨" : result.error ?? "실패");
+    if (result.success) await refetch();
+  };
+
   return (
-    <div className="min-h-screen bg-white flex">
-      {/* PC 사이드바 */}
-      <Sidebar className="hidden lg:flex" />
+    <div className="min-h-screen bg-white flex flex-col">
+      <TopBar onMenuClick={() => setIsDrawerOpen(true)} />
 
       {/* 메인 콘텐츠 영역 */}
-      <main className="flex-1 lg:ml-[272px] min-h-screen bg-white">
-        {/* 모바일 헤더 (햄버거 메뉴) */}
-        <div className="lg:hidden sticky top-0 z-30 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
-          <Link href="/storage" className="flex items-center">
-            <Image
-              src="/logo.png"
-              alt="레포트온"
-              width={96}
-              height={24}
-              className="h-6 w-auto"
-              priority
-            />
-          </Link>
-          <button
-            onClick={() => setIsDrawerOpen(!isDrawerOpen)}
-            className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors relative"
-            aria-label={isDrawerOpen ? "메뉴 닫기" : "메뉴 열기"}
-          >
-            <Menu
-              className={`w-6 h-6 text-gray-700 absolute transition-all duration-300 ${
-                isDrawerOpen ? "opacity-0 rotate-90 scale-0" : "opacity-100 rotate-0 scale-100"
-              }`}
-            />
-            <X
-              className={`w-6 h-6 text-gray-700 absolute transition-all duration-300 ${
-                isDrawerOpen ? "opacity-100 rotate-0 scale-100" : "opacity-0 rotate-90 scale-0"
-              }`}
-            />
-          </button>
-        </div>
-
+      <main className="flex-1 min-h-screen bg-white">
         {/* 메인 콘텐츠 */}
         <div className="px-4 lg:px-[176px] py-8 lg:py-[120px] max-w-[1440px] mx-auto page-transition">
           {/* 헤더 섹션 */}
@@ -126,6 +90,10 @@ export default function HomePage() {
               안녕하세요, {DUMMY_USER_NAME}님
             </h1>
           </div>
+
+          {error && (
+            <p className="mb-4 text-sm text-red-600">보고서 목록을 불러오지 못했어요.</p>
+          )}
 
           {/* 진행중 카드 (생성중이 하나라도 있을 때) */}
           {generatingReports.length > 0 && (
@@ -189,17 +157,42 @@ export default function HomePage() {
               나의 상담 내역
             </h2>
             <div className="space-y-6">
-              {DUMMY_RECENT_REPORTS.map((report) => (
-                <ReportRow
-                  key={report.id}
-                  title={report.title}
-                  date={report.date}
-                  duration={report.duration}
-                  href={`/reports/${report.id}`}
-                />
-              ))}
+              {isLoading ? (
+                <p className="text-[#626474] text-sm">불러오는 중...</p>
+              ) : (
+                reports.map((report) => (
+                  <ReportRow
+                    key={report.id}
+                    title={report.title}
+                    date={report.date}
+                    duration={report.duration}
+                    href={
+                      report.status === "generating" || report.status === "uploading"
+                        ? "#"
+                        : `/reports/${report.id}`
+                    }
+                    status={report.status}
+                  />
+                ))
+              )}
             </div>
           </div>
+
+          {/* [개발용] 테스트 보고서 생성 */}
+          {process.env.NODE_ENV === "development" && (
+            <div className="mt-8 pt-6 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={handleTestReportCreate}
+                className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                테스트 보고서 생성
+              </button>
+              {testReportMessage && (
+                <p className="mt-2 text-sm text-gray-600">{testReportMessage}</p>
+              )}
+            </div>
+          )}
         </div>
       </main>
 
