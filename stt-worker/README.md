@@ -1,22 +1,66 @@
 # STT Worker (Report-on)
 
-Node.js + Express 워커: Supabase Storage 오디오 → ffmpeg로 WAV(16kHz mono) 변환 → CLOVA Speech STT → 결과를 Supabase `public.reports`에 저장합니다.
+Node.js + Express 워커: Supabase Storage 오디오 → ffmpeg WAV(16kHz mono) → **NCP Object Storage** 업로드 → **CLOVA Speech 장문 인식(Object Storage)** → 결과를 Supabase `public.reports`에 저장합니다.
 
 - **비동기**: `POST /jobs/start-stt`는 작업 시작만 받고 즉시 `{ ok: true }` 응답 후, 백그라운드에서 처리합니다.
+- 7분 이상 파일도 폴링 타임아웃(기본 10분) 내에서 안정적으로 처리합니다.
 
 ---
 
 ## 환경 변수
+
+### Supabase
 
 | 변수 | 필수 | 설명 |
 |------|------|------|
 | `SUPABASE_URL` | ✅ | Supabase 프로젝트 URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Supabase **service role** 키 (브라우저 노출 금지) |
 | `SUPABASE_STORAGE_BUCKET` | | Storage 버킷 이름 (기본값: `audio`) |
-| `CLOVA_ENDPOINT` | ✅ | CLOVA Speech STT 요청 URL (예: `https://naveropenapi.apigw.ntruss.com/recog/v1/stt`) |
-| `CLOVA_CLIENT_ID` | ✅ | CLOVA API Key ID (또는 `CLOVA_API_KEY` 사용) |
-| `CLOVA_CLIENT_SECRET` | ✅ | CLOVA API Key Secret (또는 `CLOVA_API_KEY` 사용) |
+
+### NCP Object Storage (S3 호환)
+
+| 변수 | 필수 | 설명 |
+|------|------|------|
+| `NCP_STT_BUCKET` | ✅ | 장문 인식용 오디오 업로드 버킷 (예: `reporton-stt-kr`) |
+| `NCP_STT_REGION` | | 리전 (기본값: `kr`) |
+| `NCP_ACCESS_KEY` | ✅ | NCP Object Storage Access Key (S3 API용) |
+| `NCP_SECRET_KEY` | ✅ | NCP Object Storage Secret Key |
+| `NCP_ENDPOINT` | ✅ | S3 호환 엔드포인트 (예: `https://kr.object.ncloudstorage.com`) |
+
+### CLOVA Speech 장문 인식
+
+| 변수 | 필수 | 설명 |
+|------|------|------|
+| `CLOVA_SECRET_KEY` | ✅ | CLOVA Speech API Secret Key (헤더 `X-CLOVASPEECH-API-KEY`) |
+| `CLOVA_LONG_ENDPOINT` | ✅ | 장문 인식 작업 생성 URL (예: `https://clovaspeech-gw.ncloud.com/.../recognizer/object-storage`) |
+| `CLOVA_LONG_STATUS_ENDPOINT` | ✅ | 작업 상태 조회 URL. `?token=` 또는 `&token=` 자동 추가. 또는 `{{token}}` 포함 시 치환 (예: `https://.../result/{{token}}`) |
+
+### 기타
+
+| 변수 | 필수 | 설명 |
+|------|------|------|
 | `PORT` | | 서버 포트 (기본값: `3001`) |
+| `DELETE_NCP_AFTER_SUCCESS` | | STT 성공 후 NCP `input/{reportId}.wav` 삭제 여부. `false`면 삭제 안 함 (기본: 삭제) |
+
+---
+
+## NCP Object Storage / CLOVA 설정 예시
+
+### NCP Object Storage
+
+1. NCP 콘솔에서 Object Storage 버킷 생성 (예: `reporton-stt-kr`).
+2. **API 인증키** 발급 (마이페이지 → 계정 관리 → 인증키 관리) → Access Key / Secret Key 확인.
+3. S3 API 호환 엔드포인트:
+   - 한국 리전: `https://kr.object.ncloudstorage.com`
+4. CLOVA Speech **도메인**에서 “인식 대상 저장 경로”를 버킷 내 `input`(또는 사용할 prefix)으로 설정해 두면, 워커가 업로드하는 `input/{reportId}.wav`를 인식할 수 있습니다.
+
+### CLOVA 장문 인식 (Object Storage)
+
+1. CLOVA Speech 콘솔에서 **도메인** 생성 시 “인식 대상 저장 경로”를 위 NCP 버킷 경로와 맞춥니다 (예: `input`).
+2. **Invoke URL** 확인:
+   - 작업 생성: `https://clovaspeech-gw.ncloud.com/external/v1/{invoke-id}/recognizer/object-storage`
+   - 상태 조회: 동일 베이스 + `/result` 또는 문서에 안내된 상태 조회 URL (예: `https://.../result?token=` 이면 `CLOVA_LONG_STATUS_ENDPOINT=https://.../result` 로 설정).
+3. **Secret Key**를 CLOVA Speech 앱에서 발급받아 `CLOVA_SECRET_KEY`로 설정합니다.
 
 ---
 
@@ -27,14 +71,10 @@ Node.js + Express 워커: Supabase Storage 오디오 → ffmpeg로 WAV(16kHz mon
 - `id` (uuid)
 - `status` (text): `uploading` | `generating` | `done` | `failed`
 - `transcript` (text, nullable)
-- `audio_path` (text, nullable): 있으면 이 경로로 다운로드, 없으면 `reports/{reportId}/raw.webm` 사용
-- `error_message` (text, nullable): 실패 시 에러 메시지 저장
+- `audio_path` (text, nullable)
+- `error_message` (text, nullable): 실패 시 디버깅용 메시지 저장
 
-`error_message` 컬럼이 없다면 Supabase SQL Editor에서 실행:
-
-```sql
-alter table public.reports add column if not exists error_message text;
-```
+선택적으로 `ncp_object_key`, `stt_job_id` 컬럼을 추가해 두면, 나중에 워커에서 저장하도록 확장할 수 있습니다.
 
 ---
 
@@ -42,113 +82,56 @@ alter table public.reports add column if not exists error_message text;
 
 ### POST /jobs/start-stt
 
-STT 작업을 큐에 넣고 즉시 응답합니다.
-
-**Request**
-
-```json
-{ "reportId": "uuid-of-report" }
-```
-
-**Response (즉시)**
-
-- `200`: `{ "ok": true }`
-- `400`: `{ "ok": false, "error": "reportId required" }`
-
-이후 백그라운드에서:
-
-1. `reports`에서 해당 row 조회
-2. Storage에서 오디오 다운로드 (`audio_path` 우선, 없으면 `reports/{reportId}/raw.webm`)
-3. ffmpeg로 WAV 16kHz mono 변환
-4. CLOVA Speech STT 호출
-5. 성공 시 `reports` 업데이트: `transcript`, `status = 'done'`
-6. 실패 시 `status = 'failed'`, `error_message` 저장
+동일. body `{ "reportId": "uuid" }`, 즉시 `{ "ok": true }`.
 
 ### GET /health
 
-헬스 체크. `200` + `{ "ok": true }`.
+동일. `200` + `{ "ok": true }`.
 
 ---
 
-## Storage 경로 규칙
+## 처리 흐름 (백그라운드)
 
-- 버킷: `audio` (또는 `SUPABASE_STORAGE_BUCKET`)
-- 경로: `reports/{reportId}/raw.webm` (확장자는 webm 가정)
-
----
-
-## 로컬 실행
-
-```bash
-cd stt-worker
-npm install
-# .env 또는 환경변수 설정 후
-npm run build && npm start
-# 또는 개발 시
-npm run dev
-```
-
-로컬에서 ffmpeg 필요:
-
-```bash
-# macOS
-brew install ffmpeg
-```
+1. Supabase에서 report row 조회 → Storage에서 오디오 다운로드
+2. ffmpeg로 WAV 16kHz mono 변환
+3. NCP Object Storage에 `input/{reportId}.wav` 업로드 (Content-Type: audio/wav)
+4. CLOVA 장문 인식 작업 생성 (Object Storage dataKey 지정)
+5. 상태 조회 URL로 2초 간격 폴링 (최대 약 10분)
+6. 완료 시 `transcript` 추출 (전체 텍스트 또는 segments 합침)
+7. Supabase `reports` 업데이트: `transcript`, `status='done'`, `error_message=null`
+8. (기본 ON) NCP `input/{reportId}.wav` 삭제
+9. 임시 파일 삭제  
+실패 시 `status='failed'`, `error_message`에 원인 저장.
 
 ---
 
-## Render에서 배포 (Web Service)
-
-### 1. Render 대시보드
-
-1. [Render](https://render.com) 로그인 후 **Dashboard** → **New** → **Web Service**
-2. 저장소 연결 (이 레포지토리 선택)
-
-### 2. 빌드·실행 설정
-
-- **Root Directory**: `stt-worker` 로 설정 (모노레포인 경우)
-- **Runtime**: `Docker` 선택  
-  **또는** Runtime `Node`인 경우:
-  - **Build Command**: `npm install && npm run build`
-  - **Start Command**: `npm start`
-
-Docker 사용 시:
-
-- **Dockerfile Path**: `stt-worker/Dockerfile` (또는 루트가 stt-worker면 `Dockerfile`)
-
-### 3. 환경 변수
-
-Render **Environment** 탭에서 다음 추가:
+## Render 환경 변수 예시
 
 | Key | Value |
 |-----|--------|
-| `SUPABASE_URL` | Supabase 프로젝트 URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (Settings → API) |
+| `SUPABASE_URL` | `https://xxx.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | (Service role key) |
 | `SUPABASE_STORAGE_BUCKET` | `audio` |
-| `CLOVA_ENDPOINT` | CLOVA STT URL (예: `https://naveropenapi.apigw.ntruss.com/recog/v1/stt`) |
-| `CLOVA_CLIENT_ID` | CLOVA Client ID |
-| `CLOVA_CLIENT_SECRET` | CLOVA Client Secret |
-| `PORT` | `3001` (Render가 자동 할당할 수도 있음) |
+| `NCP_STT_BUCKET` | `reporton-stt-kr` |
+| `NCP_STT_REGION` | `kr` |
+| `NCP_ACCESS_KEY` | (NCP Access Key) |
+| `NCP_SECRET_KEY` | (NCP Secret Key) |
+| `NCP_ENDPOINT` | `https://kr.object.ncloudstorage.com` |
+| `CLOVA_SECRET_KEY` | (CLOVA Speech Secret Key) |
+| `CLOVA_LONG_ENDPOINT` | `https://clovaspeech-gw.ncloud.com/.../recognizer/object-storage` |
+| `CLOVA_LONG_STATUS_ENDPOINT` | `https://clovaspeech-gw.ncloud.com/.../recognizer/object-storage/result` |
+| `PORT` | `3001` |
 
-### 4. 배포
+---
 
-- **Create Web Service** 후 자동 배포
-- 로그에서 `STT worker listening on port ...` 확인
-- **Health Check Path**: ` /health` 로 설정 권장
+## 로컬 실행 / Docker
 
-### 5. 동작 확인
-
-```bash
-curl -X POST https://<your-service>.onrender.com/jobs/start-stt \
-  -H "Content-Type: application/json" \
-  -d '{"reportId":"<실제-report-uuid>"}'
-# 즉시 { "ok": true } 응답
-# 이후 Supabase reports 테이블에서 해당 row의 transcript, status 확인
-```
+로컬: `npm install` 후 `npm run build && npm start` (ffmpeg 설치 필요).  
+Docker: 프로젝트 루트의 `stt-worker/Dockerfile` 사용 (Node + ffmpeg 포함).
 
 ---
 
 ## 주의사항
 
-- **SUPABASE_SERVICE_ROLE_KEY**는 서버 전용입니다. 브라우저/클라이언트에 노출하지 마세요.
-- CLOVA STT 기본 제한(예: 60초, 3MB)을 초과하는 파일은 별도(long-form) API 또는 분할 처리 필요할 수 있습니다.
+- **SUPABASE_SERVICE_ROLE_KEY**, **NCP_SECRET_KEY**, **CLOVA_SECRET_KEY**는 서버 전용입니다. 브라우저에 노출하지 마세요.
+- CLOVA 도메인의 “인식 대상 저장 경로”와 워커가 업로드하는 경로(`input/`)가 일치해야 합니다.

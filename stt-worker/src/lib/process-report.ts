@@ -4,12 +4,12 @@ import os from "os";
 import path from "path";
 import { promisify } from "util";
 import { supabase, STORAGE_BUCKET } from "./supabase";
+import { uploadWavToNcp, deleteNcpObject, getNcpObjectKey } from "./ncp-storage";
+import { createClovaLongJob, pollClovaResult } from "./clova-long";
 
 const execFileAsync = promisify(execFile);
 
-const CLOVA_ENDPOINT = process.env.CLOVA_ENDPOINT;
-const CLOVA_CLIENT_ID = process.env.CLOVA_CLIENT_ID ?? process.env.CLOVA_API_KEY;
-const CLOVA_CLIENT_SECRET = process.env.CLOVA_CLIENT_SECRET ?? process.env.CLOVA_API_KEY;
+const DELETE_NCP_AFTER_SUCCESS = process.env.DELETE_NCP_AFTER_SUCCESS !== "false";
 
 function getAudioStoragePath(reportId: string): string {
   return `reports/${reportId}/raw.webm`;
@@ -17,12 +17,13 @@ function getAudioStoragePath(reportId: string): string {
 
 /**
  * 1) reports row 조회
- * 2) Storage에서 오디오 다운로드 (audio_path 우선, 없으면 reports/{reportId}/raw.webm)
- * 3) 임시 파일로 저장
- * 4) ffmpeg로 wav 16k mono 변환
- * 5) CLOVA Speech STT 호출
- * 6) reports 업데이트: transcript, status='done' / 실패 시 status='failed', error_message
- * 7) 임시 파일 삭제
+ * 2) Supabase Storage에서 오디오 다운로드
+ * 3) ffmpeg로 wav 16k mono 변환
+ * 4) NCP Object Storage에 wav 업로드 (input/{reportId}.wav)
+ * 5) CLOVA 장문 인식 작업 생성 → 폴링으로 완료 대기 → transcript 추출
+ * 6) reports 업데이트 (transcript, status='done'; 선택 시 ncp_object_key, stt_job_id)
+ * 7) (옵션) NCP input 파일 삭제
+ * 8) 임시 파일 삭제
  */
 export async function processReport(reportId: string): Promise<void> {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "stt-"));
@@ -37,7 +38,9 @@ export async function processReport(reportId: string): Promise<void> {
       .single();
 
     if (fetchError || !row) {
-      await updateReportFailed(reportId, fetchError?.message ?? "Report not found");
+      const msg = fetchError?.message ?? "Report not found";
+      console.error("[processReport]", reportId, "fetch error:", msg);
+      await updateReportFailed(reportId, `report fetch: ${msg}`);
       return;
     }
 
@@ -47,36 +50,73 @@ export async function processReport(reportId: string): Promise<void> {
       .download(storagePath);
 
     if (downloadError || !fileData) {
-      await updateReportFailed(reportId, downloadError?.message ?? "Download failed");
+      const msg = downloadError?.message ?? "Download failed";
+      console.error("[processReport]", reportId, "download error:", msg);
+      await updateReportFailed(reportId, `storage download: ${msg}`);
       return;
     }
+    console.log("[processReport]", reportId, "download ok");
 
     await fs.writeFile(rawPath, Buffer.from(await fileData.arrayBuffer()));
 
     await convertToWav(rawPath, wavPath);
+    console.log("[processReport]", reportId, "ffmpeg ok");
 
-    const transcript = await callClovaStt(wavPath);
+    const wavBuffer = await fs.readFile(wavPath);
+    await uploadWavToNcp(reportId, wavBuffer);
+    console.log("[processReport]", reportId, "upload ncp ok");
+
+    const ncpKey = getNcpObjectKey(reportId);
+    const dataKey = ncpKey.startsWith("input/") ? `/${reportId}.wav` : ncpKey;
+    const job = await createClovaLongJob(dataKey);
+    if (!job) {
+      await updateReportFailed(reportId, "CLOVA create job failed");
+      return;
+    }
+    console.log("[processReport]", reportId, "job created token=", job.token.slice(0, 12) + "...");
+
+    const transcript = await pollClovaResult(job.token);
     if (transcript === null) {
-      await updateReportFailed(reportId, "CLOVA STT failed or returned no text");
+      await updateReportFailed(reportId, "CLOVA polling failed or timeout");
+      return;
+    }
+    console.log("[processReport]", reportId, "polling done, transcript length=", transcript.length);
+
+    const updatePayload: Record<string, unknown> = {
+      transcript,
+      status: "done",
+      error_message: null,
+    };
+    try {
+      const { error: updateError } = await supabase
+        .from("reports")
+        .update(updatePayload)
+        .eq("id", reportId);
+
+      if (updateError) {
+        console.error("[processReport] update done error:", updateError);
+        await updateReportFailed(reportId, updateError.message);
+        return;
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await updateReportFailed(reportId, `db update: ${msg}`);
       return;
     }
 
-    const { error: updateError } = await supabase
-      .from("reports")
-      .update({
-        transcript,
-        status: "done",
-        error_message: null,
-      })
-      .eq("id", reportId);
-
-    if (updateError) {
-      console.error("[processReport] update done error:", updateError);
-      await updateReportFailed(reportId, updateError.message);
+    if (DELETE_NCP_AFTER_SUCCESS) {
+      try {
+        await deleteNcpObject(reportId);
+        console.log("[processReport]", reportId, "ncp object deleted");
+      } catch (e) {
+        console.warn("[processReport] ncp delete failed (non-fatal):", e);
+      }
     }
+
+    console.log("[processReport]", reportId, "done");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[processReport]", reportId, err);
+    console.error("[processReport]", reportId, "error:", err);
     await updateReportFailed(reportId, message);
   } finally {
     await safeUnlink(rawPath);
@@ -94,36 +134,6 @@ async function convertToWav(rawPath: string, wavPath: string): Promise<void> {
     "-ac", "1",
     wavPath,
   ]);
-}
-
-async function callClovaStt(wavPath: string): Promise<string | null> {
-  if (!CLOVA_ENDPOINT || !CLOVA_CLIENT_ID || !CLOVA_CLIENT_SECRET) {
-    console.error("[CLOVA] Missing CLOVA_ENDPOINT or CLOVA_CLIENT_ID/CLOVA_CLIENT_SECRET");
-    return null;
-  }
-
-  const url = `${CLOVA_ENDPOINT}${CLOVA_ENDPOINT.includes("?") ? "&" : "?"}lang=Kor`;
-  const body = await fs.readFile(wavPath);
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/octet-stream",
-      "X-NCP-APIGW-API-KEY-ID": CLOVA_CLIENT_ID,
-      "X-NCP-APIGW-API-KEY": CLOVA_CLIENT_SECRET,
-    },
-    body,
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.error("[CLOVA] STT error:", res.status, text);
-    return null;
-  }
-
-  const json = (await res.json()) as { text?: string };
-  const text = json?.text?.trim();
-  return text ?? null;
 }
 
 async function updateReportFailed(reportId: string, errorMessage: string): Promise<void> {
