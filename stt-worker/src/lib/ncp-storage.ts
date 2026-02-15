@@ -25,10 +25,17 @@ function getClient(): S3Client {
   });
 }
 
-const OBJECT_PREFIX = "input";
+const NCP_STT_PREFIX = (process.env.NCP_STT_PREFIX ?? "input").replace(/\/$/, "");
 
 export function getNcpObjectKey(reportId: string): string {
-  return `${OBJECT_PREFIX}/${reportId}.wav`;
+  return `${NCP_STT_PREFIX}/${reportId}.wav`;
+}
+
+/** CLOVA create job에 넘길 dataKey. 기본은 업로드 키와 동일(예: input/{reportId}.wav). 도메인에서 앞 슬래시 필요 시 NCP_STT_DATAKEY_PREFIX="/input" 지정. */
+export function getClovaDataKey(reportId: string): string {
+  const prefixForDataKey = process.env.NCP_STT_DATAKEY_PREFIX ?? NCP_STT_PREFIX;
+  const normalized = prefixForDataKey.replace(/\/$/, "");
+  return normalized ? `${normalized}/${reportId}.wav` : `${reportId}.wav`;
 }
 
 export async function uploadWavToNcp(

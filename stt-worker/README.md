@@ -23,6 +23,8 @@ Node.js + Express 워커: Supabase Storage 오디오 → ffmpeg WAV(16kHz mono) 
 |------|------|------|
 | `NCP_STT_BUCKET` | ✅ | 장문 인식용 오디오 업로드 버킷 (예: `reporton-stt-kr`) |
 | `NCP_STT_REGION` | | 리전 (기본값: `kr`) |
+| `NCP_STT_PREFIX` | | 업로드 경로 prefix (기본값: `input`). 업로드 키 = `{prefix}/{reportId}.wav`, CLOVA dataKey도 동일하게 사용. |
+| `NCP_STT_DATAKEY_PREFIX` | | CLOVA dataKey용 prefix. 미설정 시 `NCP_STT_PREFIX`와 동일. 도메인에서 앞 슬래시 필요 시 `"/input"` 등 지정. |
 | `NCP_ACCESS_KEY` | ✅ | NCP Object Storage Access Key (S3 API용) |
 | `NCP_SECRET_KEY` | ✅ | NCP Object Storage Secret Key |
 | `NCP_ENDPOINT` | ✅ | S3 호환 엔드포인트 (예: `https://kr.object.ncloudstorage.com`) |

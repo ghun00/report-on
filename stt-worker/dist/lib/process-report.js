@@ -60,8 +60,7 @@ async function processReport(reportId) {
         const wavBuffer = await promises_1.default.readFile(wavPath);
         await (0, ncp_storage_1.uploadWavToNcp)(reportId, wavBuffer);
         console.log("[processReport]", reportId, "upload ncp ok");
-        const ncpKey = (0, ncp_storage_1.getNcpObjectKey)(reportId);
-        const dataKey = ncpKey.startsWith("input/") ? `/${reportId}.wav` : ncpKey;
+        const dataKey = (0, ncp_storage_1.getClovaDataKey)(reportId);
         const job = await (0, clova_long_1.createClovaLongJob)(dataKey);
         if (!job) {
             await updateReportFailed(reportId, "CLOVA create job failed");

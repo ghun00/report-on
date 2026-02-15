@@ -4,7 +4,7 @@ import os from "os";
 import path from "path";
 import { promisify } from "util";
 import { supabase, STORAGE_BUCKET } from "./supabase";
-import { uploadWavToNcp, deleteNcpObject, getNcpObjectKey } from "./ncp-storage";
+import { uploadWavToNcp, deleteNcpObject, getNcpObjectKey, getClovaDataKey } from "./ncp-storage";
 import { createClovaLongJob, pollClovaResult } from "./clova-long";
 
 const execFileAsync = promisify(execFile);
@@ -66,8 +66,7 @@ export async function processReport(reportId: string): Promise<void> {
     await uploadWavToNcp(reportId, wavBuffer);
     console.log("[processReport]", reportId, "upload ncp ok");
 
-    const ncpKey = getNcpObjectKey(reportId);
-    const dataKey = ncpKey.startsWith("input/") ? `/${reportId}.wav` : ncpKey;
+    const dataKey = getClovaDataKey(reportId);
     const job = await createClovaLongJob(dataKey);
     if (!job) {
       await updateReportFailed(reportId, "CLOVA create job failed");
