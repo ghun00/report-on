@@ -1,6 +1,7 @@
 import {
   S3Client,
   PutObjectCommand,
+  GetObjectCommand,
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 
@@ -59,6 +60,38 @@ export async function uploadWavToNcp(
 export async function deleteNcpObject(reportId: string): Promise<void> {
   if (!bucket) return;
   const key = getNcpObjectKey(reportId);
+  const client = getClient();
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    })
+  );
+}
+
+const NCP_STT_RESULT_PREFIX = (process.env.NCP_STT_RESULT_PREFIX ?? "result").replace(/\/$/, "");
+
+/** CLOVA 결과 파일 규칙: result/{reportId}.wav_{token}.json */
+export function getResultKey(reportId: string, token: string): string {
+  return `${NCP_STT_RESULT_PREFIX}/${reportId}.wav_${token}.json`;
+}
+
+export async function getObjectFromNcp(key: string): Promise<string> {
+  if (!bucket) throw new Error("NCP_STT_BUCKET is required");
+  const client = getClient();
+  const out = await client.send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    })
+  );
+  const body = out.Body;
+  if (!body) throw new Error("GetObject empty body");
+  return await body.transformToString();
+}
+
+export async function deleteNcpResultKey(key: string): Promise<void> {
+  if (!bucket) return;
   const client = getClient();
   await client.send(
     new DeleteObjectCommand({

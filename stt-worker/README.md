@@ -25,6 +25,7 @@ Node.js + Express 워커: Supabase Storage 오디오 → ffmpeg WAV(16kHz mono) 
 | `NCP_STT_REGION` | | 리전 (기본값: `kr`) |
 | `NCP_STT_PREFIX` | | 업로드 경로 prefix (기본값: `input`). 업로드 키 = `{prefix}/{reportId}.wav`, CLOVA dataKey도 동일하게 사용. |
 | `NCP_STT_DATAKEY_PREFIX` | | CLOVA dataKey용 prefix. 미설정 시 `NCP_STT_PREFIX`와 동일. 도메인에서 앞 슬래시 필요 시 `"/input"` 등 지정. |
+| `NCP_STT_RESULT_PREFIX` | | CLOVA 결과 JSON 경로 prefix (기본값: `result`). 결과 키 = `{prefix}/{reportId}.wav_{token}.json` |
 | `NCP_ACCESS_KEY` | ✅ | NCP Object Storage Access Key (S3 API용) |
 | `NCP_SECRET_KEY` | ✅ | NCP Object Storage Secret Key |
 | `NCP_ENDPOINT` | ✅ | S3 호환 엔드포인트 (예: `https://kr.object.ncloudstorage.com`) |
@@ -42,7 +43,8 @@ Node.js + Express 워커: Supabase Storage 오디오 → ffmpeg WAV(16kHz mono) 
 | 변수 | 필수 | 설명 |
 |------|------|------|
 | `PORT` | | 서버 포트 (기본값: `3001`) |
-| `DELETE_NCP_AFTER_SUCCESS` | | STT 성공 후 NCP `input/{reportId}.wav` 삭제 여부. `false`면 삭제 안 함 (기본: 삭제) |
+| `DELETE_NCP_AFTER_SUCCESS` | | STT 성공 후 NCP 입력 WAV(`input/{reportId}.wav`) 삭제 여부. `false`면 삭제 안 함 (기본: 삭제) |
+| `DELETE_NCP_RESULT_AFTER_SUCCESS` | | STT 성공 후 NCP 결과 JSON 삭제 여부. `true`로 설정 시에만 삭제 (기본: 삭제 안 함) |
 
 ---
 

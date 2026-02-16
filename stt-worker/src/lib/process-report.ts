@@ -4,12 +4,18 @@ import os from "os";
 import path from "path";
 import { promisify } from "util";
 import { supabase, STORAGE_BUCKET } from "./supabase";
-import { uploadWavToNcp, deleteNcpObject, getNcpObjectKey, getClovaDataKey } from "./ncp-storage";
+import {
+  uploadWavToNcp,
+  deleteNcpObject,
+  getClovaDataKey,
+  deleteNcpResultKey,
+} from "./ncp-storage";
 import { createClovaLongJob, pollClovaResult } from "./clova-long";
 
 const execFileAsync = promisify(execFile);
 
 const DELETE_NCP_AFTER_SUCCESS = process.env.DELETE_NCP_AFTER_SUCCESS !== "false";
+const DELETE_NCP_RESULT_AFTER_SUCCESS = process.env.DELETE_NCP_RESULT_AFTER_SUCCESS === "true";
 
 function getAudioStoragePath(reportId: string): string {
   return `reports/${reportId}/raw.webm`;
@@ -74,12 +80,13 @@ export async function processReport(reportId: string): Promise<void> {
     }
     console.log("[processReport]", reportId, "job created token=", job.token.slice(0, 12) + "...");
 
-    const transcript = await pollClovaResult(job.token);
-    if (transcript === null) {
+    const pollResult = await pollClovaResult(reportId, job.token);
+    if (pollResult === null) {
       await updateReportFailed(reportId, "CLOVA polling failed or timeout");
       return;
     }
-    console.log("[processReport]", reportId, "polling done, transcript length=", transcript.length);
+    const { transcript, resultKey } = pollResult;
+    console.log("[processReport]", reportId, "resultKey=", resultKey, "transcript length=", transcript.length);
 
     const updatePayload: Record<string, unknown> = {
       transcript,
@@ -106,9 +113,17 @@ export async function processReport(reportId: string): Promise<void> {
     if (DELETE_NCP_AFTER_SUCCESS) {
       try {
         await deleteNcpObject(reportId);
-        console.log("[processReport]", reportId, "ncp object deleted");
+        console.log("[processReport]", reportId, "ncp input wav deleted");
       } catch (e) {
-        console.warn("[processReport] ncp delete failed (non-fatal):", e);
+        console.warn("[processReport] ncp input delete failed (non-fatal):", e);
+      }
+    }
+    if (DELETE_NCP_RESULT_AFTER_SUCCESS) {
+      try {
+        await deleteNcpResultKey(resultKey);
+        console.log("[processReport]", reportId, "ncp result json deleted");
+      } catch (e) {
+        console.warn("[processReport] ncp result delete failed (non-fatal):", e);
       }
     }
 

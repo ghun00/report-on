@@ -1,3 +1,5 @@
+import { getResultKey, getObjectFromNcp } from "./ncp-storage";
+
 const CLOVA_SECRET_KEY = process.env.CLOVA_SECRET_KEY;
 const CLOVA_LONG_ENDPOINT = process.env.CLOVA_LONG_ENDPOINT;
 const CLOVA_LONG_STATUS_ENDPOINT = process.env.CLOVA_LONG_STATUS_ENDPOINT;
@@ -20,6 +22,12 @@ interface StatusResponse {
   message?: string;
   text?: string;
   segments?: Segment[];
+  [key: string]: unknown;
+}
+
+export interface PollResult {
+  transcript: string;
+  resultKey: string;
 }
 
 function logClovaResponse(prefix: string, status: number, body: string): void {
@@ -81,11 +89,22 @@ export async function createClovaLongJob(
   return { token };
 }
 
+/** 결과 JSON에서 transcript 추출: text 우선, 없으면 segments[].text join */
+function extractTranscriptFromResultJson(json: { text?: string; segments?: Segment[] }): string {
+  const text = json?.text?.trim();
+  if (text) return text;
+  const segments = json?.segments;
+  if (Array.isArray(segments) && segments.length > 0) {
+    return segments.map((s) => s?.text ?? "").filter(Boolean).join(" ");
+  }
+  return "";
+}
+
 /**
- * 작업 상태 폴링 후 완료 시 transcript 반환.
- * GET .../recognizer/{token} 형태로 호출 (CLOVA_LONG_STATUS_ENDPOINT는 .../recognizer 까지).
+ * 작업 상태 폴링 후 COMPLETED 시 NCP에서 결과 JSON 다운로드해 transcript 반환.
+ * result key 규칙: {NCP_STT_RESULT_PREFIX}/{reportId}.wav_{token}.json
  */
-export async function pollClovaResult(token: string): Promise<string | null> {
+export async function pollClovaResult(reportId: string, token: string): Promise<PollResult | null> {
   if (!CLOVA_SECRET_KEY || !CLOVA_LONG_STATUS_ENDPOINT) {
     console.error("[CLOVA] Missing CLOVA_SECRET_KEY or CLOVA_LONG_STATUS_ENDPOINT");
     return null;
@@ -125,15 +144,32 @@ export async function pollClovaResult(token: string): Promise<string | null> {
       return null;
     }
     if (result === "SUCCEEDED" || result === "COMPLETED") {
-      const fullText = json?.text?.trim();
-      if (fullText) return fullText;
-      const segments = json?.segments;
-      if (Array.isArray(segments) && segments.length > 0) {
-        return segments.map((s) => s?.text ?? "").filter(Boolean).join(" ");
+      const resultKey = getResultKey(reportId, token);
+      console.log("[CLOVA] resultKey=" + resultKey);
+
+      let resultJsonStr: string;
+      try {
+        resultJsonStr = await getObjectFromNcp(resultKey);
+      } catch (e) {
+        console.error("[CLOVA] getObjectFromNcp failed:", e);
+        return null;
       }
-      return "";
+
+      const resultJsonSnippet = resultJsonStr.slice(0, 1000);
+      console.log("[CLOVA] result JSON (first 1000):", resultJsonSnippet + (resultJsonStr.length > 1000 ? "..." : ""));
+
+      let resultJson: { text?: string; segments?: Segment[] };
+      try {
+        resultJson = JSON.parse(resultJsonStr) as { text?: string; segments?: Segment[] };
+      } catch {
+        console.error("[CLOVA] result JSON parse failed:", resultJsonStr.slice(0, 300));
+        return null;
+      }
+
+      const transcript = extractTranscriptFromResultJson(resultJson);
+      console.log("[CLOVA] transcript length=" + transcript.length);
+      return { transcript, resultKey };
     }
-    // PROCESSING or else: wait and retry
     await sleep(POLL_INTERVAL_MS);
   }
 
