@@ -1,16 +1,42 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import TopBar from "@/components/topbar";
 import MobileDrawer from "@/components/mobiledrawer";
 import ReportRow from "@/components/ui/reportrow";
+import Toast from "@/components/ui/toast";
 import { useReportsFromDb } from "@/lib/supabase/fetch-reports";
 import { createTestReportRow } from "@/lib/supabase/reports";
 
 export default function StoragePage() {
-  const { reports, isLoading, error, refetch } = useReportsFromDb();
+  const {
+    reports,
+    isLoading,
+    error,
+    refetch,
+    justCompletedCount,
+    clearJustCompleted,
+  } = useReportsFromDb();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [testReportMessage, setTestReportMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (justCompletedCount <= 0) return;
+    setToastMessage(
+      justCompletedCount === 1
+        ? "상담 보고서가 완성됐어요"
+        : `보고서 ${justCompletedCount}개가 완성됐어요`
+    );
+    clearJustCompleted();
+  }, [justCompletedCount, clearJustCompleted]);
+
+  const handleRetryReport = useCallback(
+    async (_reportId: string) => {
+      await refetch();
+    },
+    [refetch]
+  );
 
   const handleTestReportCreate = async () => {
     setTestReportMessage(null);
@@ -48,6 +74,7 @@ export default function StoragePage() {
               reports.map((report) => (
                 <ReportRow
                   key={report.id}
+                  reportId={report.id}
                   title={report.title}
                   date={report.date}
                   duration={report.duration}
@@ -57,6 +84,8 @@ export default function StoragePage() {
                       : `/reports/${report.id}`
                   }
                   status={report.status}
+                  errorMessage={report.error_message}
+                  onRetry={handleRetryReport}
                 />
               ))
             )}
@@ -81,6 +110,12 @@ export default function StoragePage() {
 
       {/* 모바일 Drawer */}
       <MobileDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
+      <Toast
+        open={!!toastMessage}
+        message={toastMessage ?? ""}
+        onClose={() => setToastMessage(null)}
+        autoHideMs={3000}
+      />
     </div>
   );
 }

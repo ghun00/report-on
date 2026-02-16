@@ -8,11 +8,17 @@ import {
   createReportRow,
   updateReportAfterUpload,
   updateReportFailed,
+  updateReportErrorMessage,
 } from "@/lib/supabase/reports";
 import { uploadRecordingBlob } from "@/lib/supabase/upload-recording";
 import { Pause, Play } from "lucide-react";
 
-type RecordingState = "recording" | "paused" | "phaseA" | "aiWorking" | "error";
+type RecordingState =
+  | "recording"
+  | "paused"
+  | "phaseA"
+  | "aiWorking"
+  | "error";
 
 // ─── 애니메이션 바 컴포넌트 ─────────────────────────────────────────────────
 function Bars({
@@ -266,7 +272,7 @@ export default function RecordPage() {
     setShowFinishConfirm(true);
   }, [state, elapsedSeconds]);
 
-  const runSaveAndGoToAiWorking = useCallback(
+  const runSaveAndFinish = useCallback(
     async (blob: Blob) => {
       lastFailedBlobRef.current = blob;
       const dateStr = new Date().toLocaleDateString("ko-KR", {
@@ -274,12 +280,12 @@ export default function RecordPage() {
         month: "2-digit",
         day: "2-digit",
       }).replace(/\. /g, ".").trim();
-      const title = `상담 보고서 ${dateStr}`;
+      const title = "상담 보고서";
 
       const createResult = await createReportRow({
         title,
         durationSec: elapsedSeconds,
-        status: "uploading",
+        status: "generating",
       });
       if (!createResult.success || !createResult.id) {
         setState("error");
@@ -290,16 +296,33 @@ export default function RecordPage() {
       const supabase = createClient();
       const audioPath = await uploadRecordingBlob(supabase, reportId, blob);
       if (!audioPath) {
-        await updateReportFailed(reportId);
+        await updateReportFailed(reportId, "upload failed: storage error");
         setState("error");
         return;
       }
       const updateResult = await updateReportAfterUpload(reportId, audioPath);
       if (!updateResult.success) {
-        await updateReportFailed(reportId);
+        await updateReportFailed(reportId, updateResult.error ?? "update failed");
         setState("error");
         return;
       }
+
+      try {
+        const res = await fetch("/api/stt/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reportId }),
+        });
+        if (!res.ok) {
+          await updateReportErrorMessage(
+            reportId,
+            `worker trigger failed (${res.status})`
+          );
+        }
+      } catch {
+        await updateReportErrorMessage(reportId, "worker trigger failed");
+      }
+
       setState("aiWorking");
     },
     [elapsedSeconds]
@@ -317,9 +340,9 @@ export default function RecordPage() {
         return;
       }
       await new Promise((r) => setTimeout(r, 800));
-      await runSaveAndGoToAiWorking(blob);
+      await runSaveAndFinish(blob);
     })();
-  }, [stopRecording, stopTimer, runSaveAndGoToAiWorking]);
+  }, [stopRecording, stopTimer, runSaveAndFinish]);
 
   const handleShortRecordingConfirm = useCallback(() => {
     setShowShortRecording(false);
@@ -333,9 +356,9 @@ export default function RecordPage() {
         return;
       }
       await new Promise((r) => setTimeout(r, 800));
-      await runSaveAndGoToAiWorking(blob);
+      await runSaveAndFinish(blob);
     })();
-  }, [stopRecording, stopTimer, runSaveAndGoToAiWorking]);
+  }, [stopRecording, stopTimer, runSaveAndFinish]);
 
   const handleRetrySave = useCallback(() => {
     const blob = lastFailedBlobRef.current;
@@ -346,9 +369,9 @@ export default function RecordPage() {
     setState("phaseA");
     (async () => {
       await new Promise((r) => setTimeout(r, 600));
-      await runSaveAndGoToAiWorking(blob);
+      await runSaveAndFinish(blob);
     })();
-  }, [runSaveAndGoToAiWorking, router]);
+  }, [runSaveAndFinish, router]);
 
   // ─── 중앙 버튼 핸들러 ──────────────────────────────────────────────────────
   const handleCenterButton = useCallback(() => {
@@ -371,7 +394,7 @@ export default function RecordPage() {
   };
 
   const isAnimating = state === "recording";
-  const isPhaseA = state === "phaseA";
+  const isPhaseA = state === "phaseA" || state === "aiWorking";
   const isDisabled =
     state === "phaseA" || state === "aiWorking" || state === "error";
 
@@ -476,7 +499,7 @@ export default function RecordPage() {
             </>
           )}
 
-          {/* phaseA / aiWorking: 파형 하단에 텍스트 + 홈으로 가기 */}
+          {/* phaseA / aiWorking: 상담 보고서 생성 안내 + 홈으로 가기 */}
           {(state === "phaseA" || state === "aiWorking") && (
             <div className="flex flex-col items-center w-full max-w-[320px]">
               <p className="text-[22px] lg:text-[28px] font-bold text-white mb-2 text-center">

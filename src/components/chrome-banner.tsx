@@ -31,7 +31,7 @@ export default function ChromeBanner() {
   return (
     <div className="w-full bg-[#1a1a1a] flex items-center justify-center px-4 py-2 relative min-h-[36px]">
       <p className="text-[11px] sm:text-xs text-white/90 pr-8 text-center">
-        현재 저희 서비스는 Chrome에서 안정적으로 동작합니다.
+        현재 저희 서비스는 PC 및 Chrome에서 안정적으로 동작합니다.
       </p>
       <button
         type="button"

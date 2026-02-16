@@ -66,19 +66,40 @@ export async function updateReportAfterUpload(
   return { success: true };
 }
 
-/** 업로드/처리 실패 시 reports.status = 'failed' */
+/** 업로드/처리 실패 시 reports.status = 'failed', 선택적으로 error_message 설정 */
 export async function updateReportFailed(
-  reportId: string
+  reportId: string,
+  errorMessage?: string
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient();
   const { error } = await supabase
     .from("reports")
-    .update({ status: "failed" })
+    .update({ status: "failed", error_message: errorMessage ?? null })
     .eq("id", reportId);
 
   if (error) {
     if (process.env.NODE_ENV === "development") {
       console.error("[updateReportFailed]", error);
+    }
+    return { success: false, error: error.message };
+  }
+  return { success: true };
+}
+
+/** 워커 트리거 실패 등: status는 유지하고 error_message만 설정 (예: generating 유지) */
+export async function updateReportErrorMessage(
+  reportId: string,
+  message: string
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("reports")
+    .update({ error_message: message })
+    .eq("id", reportId);
+
+  if (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[updateReportErrorMessage]", error);
     }
     return { success: false, error: error.message };
   }

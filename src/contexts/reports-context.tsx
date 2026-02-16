@@ -19,6 +19,8 @@ export interface ReportItem {
   duration: string;
   status: ReportStatus;
   createdAt: number;
+  /** 실패 시 서버 메시지 (failed일 때 툴팁 등 표시용) */
+  error_message?: string | null;
 }
 
 interface ReportsContextValue {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import TopBar from "@/components/topbar";
@@ -9,6 +9,7 @@ import ActionCard from "@/components/ui/actioncard";
 import StatCard from "@/components/ui/statcard";
 import ReportRow from "@/components/ui/reportrow";
 import TossStyleAlert from "@/components/ui/tossalert";
+import Toast from "@/components/ui/toast";
 import { useReportsFromDb } from "@/lib/supabase/fetch-reports";
 import { createTestReportRow } from "@/lib/supabase/reports";
 import { Mic, Upload, Loader2 } from "lucide-react";
@@ -39,13 +40,39 @@ const UploadIcon = () => (
 
 export default function HomePage() {
   const router = useRouter();
-  const { reports, isLoading, error, refetch } = useReportsFromDb();
+  const {
+    reports,
+    isLoading,
+    error,
+    refetch,
+    justCompletedCount,
+    clearJustCompleted,
+  } = useReportsFromDb();
   const generatingReports = reports.filter(
     (r) => r.status === "generating" || r.status === "uploading"
   );
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [showMicAlert, setShowMicAlert] = useState(false);
   const [testReportMessage, setTestReportMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (justCompletedCount <= 0) return;
+    setToastMessage(
+      justCompletedCount === 1
+        ? "상담 보고서가 완성됐어요"
+        : `보고서 ${justCompletedCount}개가 완성됐어요`
+    );
+    clearJustCompleted();
+  }, [justCompletedCount, clearJustCompleted]);
+
+  const handleRetryReport = useCallback(
+    async (_reportId: string) => {
+      // TODO: POST /api/reports/[id]/retry 또는 /jobs/start-stt 연동
+      await refetch();
+    },
+    [refetch]
+  );
 
   const handleStartRecording = async () => {
     try {
@@ -163,6 +190,7 @@ export default function HomePage() {
                 reports.map((report) => (
                   <ReportRow
                     key={report.id}
+                    reportId={report.id}
                     title={report.title}
                     date={report.date}
                     duration={report.duration}
@@ -172,6 +200,8 @@ export default function HomePage() {
                         : `/reports/${report.id}`
                     }
                     status={report.status}
+                    errorMessage={report.error_message}
+                    onRetry={handleRetryReport}
                   />
                 ))
               )}
@@ -205,6 +235,12 @@ export default function HomePage() {
         onClose={() => setShowMicAlert(false)}
         title="마이크 설정을 켜야 서비스를 이용할 수 있어요"
         description="브라우저 또는 시스템 설정에서 마이크 접근을 허용해주세요."
+      />
+      <Toast
+        open={!!toastMessage}
+        message={toastMessage ?? ""}
+        onClose={() => setToastMessage(null)}
+        autoHideMs={3000}
       />
     </div>
   );

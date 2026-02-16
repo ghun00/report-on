@@ -1,51 +1,58 @@
-# 녹음 → Storage 업로드 → reports 연동 요약
+# 녹음 → Storage 업로드 → STT 워커 → reports 연동 요약
+
+## 환경변수 (Next.js 앱)
+
+| 변수 | 설명 |
+|------|------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 프로젝트 URL |
+| `NEXT_PUBLIC_SUPABASE_ANON` (또는 `NEXT_PUBLIC_SUPABASE_KEY`) | Supabase anon key |
+| `STT_WORKER_URL` | **(서버 전용)** STT 워커 base URL. `POST /api/stt/start`가 이 URL로 워커를 호출. 예: `https://report-on.onrender.com`. 미설정 시 기본값 사용 |
+
+---
+
+## 종료 플로우 (한 번에 진행)
+
+1. **reports row 생성** — `status: 'generating'`, `user_id`는 `supabase.auth.getUser()` (서버)
+2. **녹음 blob 업로드** — Supabase Storage `audio` 버킷, 경로 `reports/{reportId}/raw.webm`, `upsert: true`
+3. **reports.audio_path 업데이트** — 업로드 경로로 갱신
+4. **STT 워커 호출** — `POST {NEXT_PUBLIC_STT_WORKER_URL}/jobs/start-stt` body `{ reportId }`
+5. **홈으로 이동** — 성공/실패(워커 트리거 실패 포함) 후 `router.push("/home")`. 홈/저장소 폴링으로 generating → done/failed 자동 반영
+
+에러 시: reports 생성/업로드 실패 → `status='failed'`, `error_message` 설정 후 알럿·재시도. 워커 호출 실패 → `error_message`만 설정, status는 generating 유지 후 홈으로 이동.
+
+---
 
 ## 수정·추가된 파일 목록
 
 ### 추가
-- `src/lib/constants/reports.ts` — status 상수 (`uploading` | `generating` | `done` | `failed`)
-- `src/lib/supabase/reports.ts` — Server Actions: `createReportRow`, `updateReportAfterUpload`, `updateReportFailed`, `createTestReportRow`
-- `src/lib/supabase/upload-recording.ts` — 클라이언트: `uploadRecordingBlob` (Storage 업로드)
-- `src/lib/supabase/fetch-reports.ts` — 훅: `useReportsFromDb` (reports 목록 조회, 생성중 우선 정렬)
+- `src/lib/constants/reports.ts` — status 상수
+- `src/lib/supabase/reports.ts` — Server Actions: `createReportRow`, `updateReportAfterUpload`, `updateReportFailed`, `updateReportErrorMessage`, `createTestReportRow`
+- `src/lib/supabase/upload-recording.ts` — `uploadRecordingBlob` (contentType: blob.type \|\| 'audio/webm')
+- `src/lib/supabase/fetch-reports.ts` — `useReportsFromDb` (폴링·완료 토스트 포함)
 - `docs/RECORDING_FLOW.md` — 이 문서
 
 ### 수정
-- `src/contexts/reports-context.tsx` — `ReportStatus`를 constants에서 re-export, `getGeneratingReports`에 `uploading` 포함
-- `src/components/ui/reportrow.tsx` — `uploading` 상태 라벨/스타일 추가
-- `src/app/record/page.tsx` — 종료 시 DB row 생성 → Storage 업로드 → status 업데이트 연동, 실패 시 `failed` + 재시도 UI
-- `src/app/home/page.tsx` — `useReportsFromDb`로 목록 조회, 테스트 버튼(개발 시만 노출)
-- `src/app/storage/page.tsx` — `useReportsFromDb`로 목록 조회, 테스트 버튼(개발 시만 노출)
-- `src/lib/supabase/middleware.ts` — `/record` 보호 경로 추가
-- `docs/supabase-reports-table.sql` — status에 `uploading` 추가, 기존 DB용 ALTER 주석
+- `src/app/record/page.tsx` — 종료 시 row 생성(generating) → 업로드 → audio_path 업데이트 → 워커 호출 → 홈 이동, "저장 중…" 상태 표시
+- `src/app/home/page.tsx` — `useReportsFromDb`, 완료 토스트
+- `src/app/storage/page.tsx` — `useReportsFromDb`, 완료 토스트
+- `src/components/ui/reportrow.tsx` — generating/done/failed UX, 실패 시 툴팁·다시 생성
 
 ---
 
 ## 테스트 방법
 
-1. **로그인**  
-   `/login`에서 카카오 로그인 후 `/home` 이동.
-
+1. **로그인** — `/login`에서 카카오 로그인 후 `/home` 이동.
 2. **녹음 → 종료 → 저장**  
-   - `/record` 진입 후 30초 이상 녹음  
-   - **종료** → **종료하고 저장**  
-   - Phase A 전환 후 “상담 보고서를 만들고 있어요…” 화면 확인  
-   - **홈으로 가기** 클릭
-
-3. **Storage 확인**  
-   Supabase Dashboard → Storage → `audio` 버킷 → `reports/{reportId}/raw.webm` 파일 생성 여부 확인.
-
-4. **홈/저장소에서 생성중 표시**  
-   - `/home` 또는 `/storage`에서 방금 만든 보고서가 **생성중** 배지와 함께 목록 상단附近에 노출되는지 확인.
-
-5. **개발용 테스트 버튼**  
-   - `NODE_ENV=development`일 때 `/home` 또는 `/storage` 하단의 **테스트 보고서 생성**으로 `status='generating'` row 1개 생성 후 목록 갱신 확인.
+   - `/record` 진입 후 10~15초 이상 녹음  
+   - **종료** → 확인 후 **종료하고 저장**  
+   - "저장 중…" 스피너 후 자동으로 **홈** 이동.
+3. **Storage** — `audio` 버킷 → `reports/{reportId}/raw.webm` 생성 확인.
+4. **홈/저장소** — 해당 보고서가 **생성중** → 폴링으로 **완료**로 자동 전환되는지 확인.
 
 ---
 
 ## DB status 값
 
-- `uploading` — 녹음 종료 직후 row 생성 시
-- `generating` — Storage 업로드 완료 후 (이후 AI 처리 가정)
+- `uploading` — (선택) 녹음 직후 row 생성 시
+- `generating` — row 생성 시 사용. Storage 업로드 후에도 유지. 워커가 transcript 채우면 `done`
 - `done` / `failed` — 완료 또는 실패
-
-기존 테이블에 `uploading`이 없으면 `docs/supabase-reports-table.sql` 하단의 ALTER 주석을 해제해 실행.

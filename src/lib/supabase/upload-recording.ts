@@ -18,10 +18,11 @@ export async function uploadRecordingBlob(
   blob: Blob
 ): Promise<string | null> {
   const path = getAudioUploadPath(reportId);
+  const contentType = blob.type?.trim() || "audio/webm";
   const { error } = await supabase.storage
     .from(BUCKET_AUDIO)
     .upload(path, blob, {
-      contentType: "audio/webm",
+      contentType,
       upsert: true,
     });
 
