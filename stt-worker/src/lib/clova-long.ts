@@ -83,6 +83,7 @@ export async function createClovaLongJob(
 
 /**
  * 작업 상태 폴링 후 완료 시 transcript 반환.
+ * GET .../recognizer/{token} 형태로 호출 (CLOVA_LONG_STATUS_ENDPOINT는 .../recognizer 까지).
  */
 export async function pollClovaResult(token: string): Promise<string | null> {
   if (!CLOVA_SECRET_KEY || !CLOVA_LONG_STATUS_ENDPOINT) {
@@ -90,11 +91,8 @@ export async function pollClovaResult(token: string): Promise<string | null> {
     return null;
   }
 
-  const statusUrl = CLOVA_LONG_STATUS_ENDPOINT.includes("{{token}}")
-    ? CLOVA_LONG_STATUS_ENDPOINT.replace("{{token}}", token)
-    : CLOVA_LONG_STATUS_ENDPOINT.includes("?")
-      ? `${CLOVA_LONG_STATUS_ENDPOINT}&token=${encodeURIComponent(token)}`
-      : `${CLOVA_LONG_STATUS_ENDPOINT}?token=${encodeURIComponent(token)}`;
+  const statusUrl = `${CLOVA_LONG_STATUS_ENDPOINT.replace(/\/$/, "")}/${token}`;
+  console.log("[CLOVA] poll URL:", statusUrl);
 
   for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
     const res = await fetch(statusUrl, {

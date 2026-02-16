@@ -35,7 +35,7 @@ Node.js + Express 워커: Supabase Storage 오디오 → ffmpeg WAV(16kHz mono) 
 |------|------|------|
 | `CLOVA_SECRET_KEY` | ✅ | CLOVA Speech API Secret Key (헤더 `X-CLOVASPEECH-API-KEY`) |
 | `CLOVA_LONG_ENDPOINT` | ✅ | 장문 인식 작업 생성 URL (예: `https://clovaspeech-gw.ncloud.com/.../recognizer/object-storage`) |
-| `CLOVA_LONG_STATUS_ENDPOINT` | ✅ | 작업 상태 조회 URL. `?token=` 또는 `&token=` 자동 추가. 또는 `{{token}}` 포함 시 치환 (예: `https://.../result/{{token}}`) |
+| `CLOVA_LONG_STATUS_ENDPOINT` | ✅ | 작업 상태 조회 base URL. `.../recognizer` 까지 두면, 코드에서 `GET {이값}/{token}` 으로 호출 (예: `https://clovaspeech-gw.ncloud.com/.../recognizer`) |
 
 ### 기타
 
@@ -61,7 +61,7 @@ Node.js + Express 워커: Supabase Storage 오디오 → ffmpeg WAV(16kHz mono) 
 1. CLOVA Speech 콘솔에서 **도메인** 생성 시 “인식 대상 저장 경로”를 위 NCP 버킷 경로와 맞춥니다 (예: `input`).
 2. **Invoke URL** 확인:
    - 작업 생성: `https://clovaspeech-gw.ncloud.com/external/v1/{invoke-id}/recognizer/object-storage`
-   - 상태 조회: 동일 베이스 + `/result` 또는 문서에 안내된 상태 조회 URL (예: `https://.../result?token=` 이면 `CLOVA_LONG_STATUS_ENDPOINT=https://.../result` 로 설정).
+   - 상태 조회: `GET .../recognizer/{token}` 형태. `CLOVA_LONG_STATUS_ENDPOINT`에는 `.../recognizer` 까지만 설정 (코드에서 `/{token}` 자동 추가).
 3. **Secret Key**를 CLOVA Speech 앱에서 발급받아 `CLOVA_SECRET_KEY`로 설정합니다.
 
 ---
@@ -121,7 +121,7 @@ Node.js + Express 워커: Supabase Storage 오디오 → ffmpeg WAV(16kHz mono) 
 | `NCP_ENDPOINT` | `https://kr.object.ncloudstorage.com` |
 | `CLOVA_SECRET_KEY` | (CLOVA Speech Secret Key) |
 | `CLOVA_LONG_ENDPOINT` | `https://clovaspeech-gw.ncloud.com/.../recognizer/object-storage` |
-| `CLOVA_LONG_STATUS_ENDPOINT` | `https://clovaspeech-gw.ncloud.com/.../recognizer/object-storage/result` |
+| `CLOVA_LONG_STATUS_ENDPOINT` | `https://clovaspeech-gw.ncloud.com/.../recognizer` (코드에서 `/{token}` 추가해 호출) |
 | `PORT` | `3001` |
 
 ---
