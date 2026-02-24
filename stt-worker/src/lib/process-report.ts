@@ -11,6 +11,7 @@ import {
   deleteNcpResultKey,
 } from "./ncp-storage";
 import { createClovaLongJob, pollClovaResult } from "./clova-long";
+import { generateReportJson } from "./report-generator";
 
 const execFileAsync = promisify(execFile);
 
@@ -108,6 +109,51 @@ export async function processReport(reportId: string): Promise<void> {
       const msg = e instanceof Error ? e.message : String(e);
       await updateReportFailed(reportId, `db update: ${msg}`);
       return;
+    }
+
+    // report_json 생성 (transcript 200자 미만이면 스킵)
+    if (transcript.length < 200) {
+      console.log("[processReport]", reportId, "report generation skipped (transcript length < 200)");
+      const { error: skipError } = await supabase
+        .from("reports")
+        .update({
+          report_json: null,
+          error_message: "transcript too short for report generation",
+        })
+        .eq("id", reportId);
+      if (skipError) console.error("[processReport] update report_json skip error:", skipError);
+    } else {
+      try {
+        const reportJson = await generateReportJson(transcript);
+        const { error: reportUpdateError } = await supabase
+          .from("reports")
+          .update({
+            report_json: reportJson,
+            error_message: null,
+          })
+          .eq("id", reportId);
+        if (reportUpdateError) {
+          console.error("[processReport]", reportId, "report_json update error:", reportUpdateError);
+          await supabase
+            .from("reports")
+            .update({
+              error_message: `report save failed: ${reportUpdateError.message}`,
+            })
+            .eq("id", reportId);
+        } else {
+          console.log("[processReport]", reportId, "report_json generated and saved");
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("[processReport]", reportId, "report generation failed:", msg);
+        await supabase
+          .from("reports")
+          .update({
+            report_json: null,
+            error_message: `report generation failed: ${msg.slice(0, 200)}`,
+          })
+          .eq("id", reportId);
+      }
     }
 
     if (DELETE_NCP_AFTER_SUCCESS) {

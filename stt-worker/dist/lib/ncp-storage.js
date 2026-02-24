@@ -4,6 +4,9 @@ exports.getNcpObjectKey = getNcpObjectKey;
 exports.getClovaDataKey = getClovaDataKey;
 exports.uploadWavToNcp = uploadWavToNcp;
 exports.deleteNcpObject = deleteNcpObject;
+exports.getResultKey = getResultKey;
+exports.getObjectFromNcp = getObjectFromNcp;
+exports.deleteNcpResultKey = deleteNcpResultKey;
 const client_s3_1 = require("@aws-sdk/client-s3");
 const endpoint = process.env.NCP_ENDPOINT;
 const region = process.env.NCP_STT_REGION ?? "kr";
@@ -51,6 +54,33 @@ async function deleteNcpObject(reportId) {
     if (!bucket)
         return;
     const key = getNcpObjectKey(reportId);
+    const client = getClient();
+    await client.send(new client_s3_1.DeleteObjectCommand({
+        Bucket: bucket,
+        Key: key,
+    }));
+}
+const NCP_STT_RESULT_PREFIX = (process.env.NCP_STT_RESULT_PREFIX ?? "result").replace(/\/$/, "");
+/** CLOVA 결과 파일 규칙: result/{reportId}.wav_{token}.json */
+function getResultKey(reportId, token) {
+    return `${NCP_STT_RESULT_PREFIX}/${reportId}.wav_${token}.json`;
+}
+async function getObjectFromNcp(key) {
+    if (!bucket)
+        throw new Error("NCP_STT_BUCKET is required");
+    const client = getClient();
+    const out = await client.send(new client_s3_1.GetObjectCommand({
+        Bucket: bucket,
+        Key: key,
+    }));
+    const body = out.Body;
+    if (!body)
+        throw new Error("GetObject empty body");
+    return await body.transformToString();
+}
+async function deleteNcpResultKey(key) {
+    if (!bucket)
+        return;
     const client = getClient();
     await client.send(new client_s3_1.DeleteObjectCommand({
         Bucket: bucket,

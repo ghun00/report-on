@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createClovaLongJob = createClovaLongJob;
 exports.pollClovaResult = pollClovaResult;
+const ncp_storage_1 = require("./ncp-storage");
 const CLOVA_SECRET_KEY = process.env.CLOVA_SECRET_KEY;
 const CLOVA_LONG_ENDPOINT = process.env.CLOVA_LONG_ENDPOINT;
 const CLOVA_LONG_STATUS_ENDPOINT = process.env.CLOVA_LONG_STATUS_ENDPOINT;
@@ -57,19 +58,28 @@ async function createClovaLongJob(dataKey) {
     }
     return { token };
 }
+/** 결과 JSON에서 transcript 추출: text 우선, 없으면 segments[].text join */
+function extractTranscriptFromResultJson(json) {
+    const text = json?.text?.trim();
+    if (text)
+        return text;
+    const segments = json?.segments;
+    if (Array.isArray(segments) && segments.length > 0) {
+        return segments.map((s) => s?.text ?? "").filter(Boolean).join(" ");
+    }
+    return "";
+}
 /**
- * 작업 상태 폴링 후 완료 시 transcript 반환.
+ * 작업 상태 폴링 후 COMPLETED 시 NCP에서 결과 JSON 다운로드해 transcript 반환.
+ * result key 규칙: {NCP_STT_RESULT_PREFIX}/{reportId}.wav_{token}.json
  */
-async function pollClovaResult(token) {
+async function pollClovaResult(reportId, token) {
     if (!CLOVA_SECRET_KEY || !CLOVA_LONG_STATUS_ENDPOINT) {
         console.error("[CLOVA] Missing CLOVA_SECRET_KEY or CLOVA_LONG_STATUS_ENDPOINT");
         return null;
     }
-    const statusUrl = CLOVA_LONG_STATUS_ENDPOINT.includes("{{token}}")
-        ? CLOVA_LONG_STATUS_ENDPOINT.replace("{{token}}", token)
-        : CLOVA_LONG_STATUS_ENDPOINT.includes("?")
-            ? `${CLOVA_LONG_STATUS_ENDPOINT}&token=${encodeURIComponent(token)}`
-            : `${CLOVA_LONG_STATUS_ENDPOINT}?token=${encodeURIComponent(token)}`;
+    const statusUrl = `${CLOVA_LONG_STATUS_ENDPOINT.replace(/\/$/, "")}/${token}`;
+    console.log("[CLOVA] poll URL:", statusUrl);
     for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
         const res = await fetch(statusUrl, {
             method: "GET",
@@ -98,16 +108,30 @@ async function pollClovaResult(token) {
             return null;
         }
         if (result === "SUCCEEDED" || result === "COMPLETED") {
-            const fullText = json?.text?.trim();
-            if (fullText)
-                return fullText;
-            const segments = json?.segments;
-            if (Array.isArray(segments) && segments.length > 0) {
-                return segments.map((s) => s?.text ?? "").filter(Boolean).join(" ");
+            const resultKey = (0, ncp_storage_1.getResultKey)(reportId, token);
+            console.log("[CLOVA] resultKey=" + resultKey);
+            let resultJsonStr;
+            try {
+                resultJsonStr = await (0, ncp_storage_1.getObjectFromNcp)(resultKey);
             }
-            return "";
+            catch (e) {
+                console.error("[CLOVA] getObjectFromNcp failed:", e);
+                return null;
+            }
+            const resultJsonSnippet = resultJsonStr.slice(0, 1000);
+            console.log("[CLOVA] result JSON (first 1000):", resultJsonSnippet + (resultJsonStr.length > 1000 ? "..." : ""));
+            let resultJson;
+            try {
+                resultJson = JSON.parse(resultJsonStr);
+            }
+            catch {
+                console.error("[CLOVA] result JSON parse failed:", resultJsonStr.slice(0, 300));
+                return null;
+            }
+            const transcript = extractTranscriptFromResultJson(resultJson);
+            console.log("[CLOVA] transcript length=" + transcript.length);
+            return { transcript, resultKey };
         }
-        // PROCESSING or else: wait and retry
         await sleep(POLL_INTERVAL_MS);
     }
     console.error("[CLOVA] poll timeout after", POLL_MAX_ATTEMPTS, "attempts");

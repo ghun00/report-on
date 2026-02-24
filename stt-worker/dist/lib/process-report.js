@@ -12,8 +12,10 @@ const util_1 = require("util");
 const supabase_1 = require("./supabase");
 const ncp_storage_1 = require("./ncp-storage");
 const clova_long_1 = require("./clova-long");
+const report_generator_1 = require("./report-generator");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 const DELETE_NCP_AFTER_SUCCESS = process.env.DELETE_NCP_AFTER_SUCCESS !== "false";
+const DELETE_NCP_RESULT_AFTER_SUCCESS = process.env.DELETE_NCP_RESULT_AFTER_SUCCESS === "true";
 function getAudioStoragePath(reportId) {
     return `reports/${reportId}/raw.webm`;
 }
@@ -67,12 +69,13 @@ async function processReport(reportId) {
             return;
         }
         console.log("[processReport]", reportId, "job created token=", job.token.slice(0, 12) + "...");
-        const transcript = await (0, clova_long_1.pollClovaResult)(job.token);
-        if (transcript === null) {
+        const pollResult = await (0, clova_long_1.pollClovaResult)(reportId, job.token);
+        if (pollResult === null) {
             await updateReportFailed(reportId, "CLOVA polling failed or timeout");
             return;
         }
-        console.log("[processReport]", reportId, "polling done, transcript length=", transcript.length);
+        const { transcript, resultKey } = pollResult;
+        console.log("[processReport]", reportId, "resultKey=", resultKey, "transcript length=", transcript.length);
         const updatePayload = {
             transcript,
             status: "done",
@@ -94,13 +97,70 @@ async function processReport(reportId) {
             await updateReportFailed(reportId, `db update: ${msg}`);
             return;
         }
+        // report_json 생성 (transcript 200자 미만이면 스킵)
+        if (transcript.length < 200) {
+            console.log("[processReport]", reportId, "report generation skipped (transcript length < 200)");
+            const { error: skipError } = await supabase_1.supabase
+                .from("reports")
+                .update({
+                report_json: null,
+                error_message: "transcript too short for report generation",
+            })
+                .eq("id", reportId);
+            if (skipError)
+                console.error("[processReport] update report_json skip error:", skipError);
+        }
+        else {
+            try {
+                const reportJson = await (0, report_generator_1.generateReportJson)(transcript);
+                const { error: reportUpdateError } = await supabase_1.supabase
+                    .from("reports")
+                    .update({
+                    report_json: reportJson,
+                    error_message: null,
+                })
+                    .eq("id", reportId);
+                if (reportUpdateError) {
+                    console.error("[processReport]", reportId, "report_json update error:", reportUpdateError);
+                    await supabase_1.supabase
+                        .from("reports")
+                        .update({
+                        error_message: `report save failed: ${reportUpdateError.message}`,
+                    })
+                        .eq("id", reportId);
+                }
+                else {
+                    console.log("[processReport]", reportId, "report_json generated and saved");
+                }
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                console.error("[processReport]", reportId, "report generation failed:", msg);
+                await supabase_1.supabase
+                    .from("reports")
+                    .update({
+                    report_json: null,
+                    error_message: `report generation failed: ${msg.slice(0, 200)}`,
+                })
+                    .eq("id", reportId);
+            }
+        }
         if (DELETE_NCP_AFTER_SUCCESS) {
             try {
                 await (0, ncp_storage_1.deleteNcpObject)(reportId);
-                console.log("[processReport]", reportId, "ncp object deleted");
+                console.log("[processReport]", reportId, "ncp input wav deleted");
             }
             catch (e) {
-                console.warn("[processReport] ncp delete failed (non-fatal):", e);
+                console.warn("[processReport] ncp input delete failed (non-fatal):", e);
+            }
+        }
+        if (DELETE_NCP_RESULT_AFTER_SUCCESS) {
+            try {
+                await (0, ncp_storage_1.deleteNcpResultKey)(resultKey);
+                console.log("[processReport]", reportId, "ncp result json deleted");
+            }
+            catch (e) {
+                console.warn("[processReport] ncp result delete failed (non-fatal):", e);
             }
         }
         console.log("[processReport]", reportId, "done");

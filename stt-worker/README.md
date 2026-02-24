@@ -38,6 +38,19 @@ Node.js + Express 워커: Supabase Storage 오디오 → ffmpeg WAV(16kHz mono) 
 | `CLOVA_LONG_ENDPOINT` | ✅ | 장문 인식 작업 생성 URL (예: `https://clovaspeech-gw.ncloud.com/.../recognizer/object-storage`) |
 | `CLOVA_LONG_STATUS_ENDPOINT` | ✅ | 작업 상태 조회 base URL. `.../recognizer` 까지 두면, 코드에서 `GET {이값}/{token}` 으로 호출 (예: `https://clovaspeech-gw.ncloud.com/.../recognizer`) |
 
+### OpenAI (상담 보고서 생성)
+
+STT 완료 후 대본(transcript)으로부터 `report_json`(meta/status_analysis/executive_summary/detailed_notes) 생성 시 사용. **서버 환경변수로만 설정.**
+
+| 변수 | 필수 | 설명 |
+|------|------|------|
+| `OPENAI_API_KEY` | ✅ (보고서 생성 시) | OpenAI API Key (서버 전용, 노출 금지) |
+| `OPENAI_MODEL` | | 모델 (기본값: `gpt-4o-mini`) |
+| `OPENAI_BASE_URL` | | API base URL (기본: `https://api.openai.com/v1`) |
+
+- transcript 200자 미만이면 보고서 생성 스킵, `error_message`에 안내 저장.
+- 생성 실패 시 1회 재시도, 실패 시 `error_message`만 저장, `report_json`은 비움.
+
 ### 기타
 
 | 변수 | 필수 | 설명 |
