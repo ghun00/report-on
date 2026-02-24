@@ -81,14 +81,24 @@ async function callOpenAI(transcript) {
     });
     if (!res.ok) {
         const text = await res.text();
-        throw new Error(`OpenAI API ${res.status}: ${text.slice(0, 200)}`);
+        const errSnippet = text.slice(0, 500);
+        console.error("[report-generator] OpenAI API error:", "status=", res.status, "body=", errSnippet);
+        throw new Error(`OpenAI API ${res.status}: ${errSnippet}`);
     }
     const data = (await res.json());
     const content = data?.choices?.[0]?.message?.content;
-    if (typeof content !== "string")
+    if (typeof content !== "string") {
+        console.error("[report-generator] OpenAI response missing content, keys=", data ? Object.keys(data) : "null");
         throw new Error("OpenAI response missing content");
+    }
     const raw = content.trim().replace(/^```json\s*|\s*```$/g, "");
-    return JSON.parse(raw);
+    try {
+        return JSON.parse(raw);
+    }
+    catch (parseErr) {
+        console.error("[report-generator] JSON parse error:", parseErr instanceof Error ? parseErr.message : String(parseErr), "raw length=", raw.length);
+        throw parseErr;
+    }
 }
 /**
  * transcript로부터 report_json 생성. 검증 통과 시 스키마 객체 반환.
@@ -106,13 +116,17 @@ async function generateReportJson(transcript) {
                 return parsed;
             }
             lastError = new Error("Schema validation failed");
+            console.warn("[report-generator] schema validation failed, attempt=", attempt);
         }
         catch (e) {
             lastError = e instanceof Error ? e : new Error(String(e));
+            console.error("[report-generator] attempt failed:", attempt, lastError.message);
         }
         if (attempt < 2) {
             console.warn("[report-generator] retry after failure, attempt=", attempt);
         }
     }
-    throw lastError ?? new Error("report generation failed");
+    const err = lastError ?? new Error("report generation failed");
+    console.error("[report-generator] report generation failed:", err.message);
+    throw err;
 }

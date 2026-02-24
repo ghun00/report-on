@@ -111,6 +111,7 @@ async function processReport(reportId) {
                 console.error("[processReport] update report_json skip error:", skipError);
         }
         else {
+            console.log(`[processReport] ${reportId} report generation start, transcript length=${transcript.length}`);
             try {
                 const reportJson = await (0, report_generator_1.generateReportJson)(transcript);
                 const { error: reportUpdateError } = await supabase_1.supabase
@@ -140,7 +141,7 @@ async function processReport(reportId) {
                     .from("reports")
                     .update({
                     report_json: null,
-                    error_message: `report generation failed: ${msg.slice(0, 200)}`,
+                    error_message: `report generation failed: ${msg.slice(0, 500)}`,
                 })
                     .eq("id", reportId);
             }

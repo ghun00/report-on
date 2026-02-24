@@ -123,6 +123,7 @@ export async function processReport(reportId: string): Promise<void> {
         .eq("id", reportId);
       if (skipError) console.error("[processReport] update report_json skip error:", skipError);
     } else {
+      console.log(`[processReport] ${reportId} report generation start, transcript length=${transcript.length}`);
       try {
         const reportJson = await generateReportJson(transcript);
         const { error: reportUpdateError } = await supabase
@@ -150,7 +151,7 @@ export async function processReport(reportId: string): Promise<void> {
           .from("reports")
           .update({
             report_json: null,
-            error_message: `report generation failed: ${msg.slice(0, 200)}`,
+            error_message: `report generation failed: ${msg.slice(0, 500)}`,
           })
           .eq("id", reportId);
       }
