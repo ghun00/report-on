@@ -4,13 +4,14 @@ import { useState } from "react";
 import TopBar from "@/components/topbar";
 import MobileDrawer from "@/components/mobiledrawer";
 import StatCard from "@/components/ui/statcard";
-
-// 더미 데이터 (Home과 동일 체계)
-const DUMMY_USER_NAME = "한지훈";
-const DUMMY_MONTHLY_TIME = 240;
+import { useCurrentUser } from "@/lib/supabase/use-current-user";
+import { useReportsFromDb, useMonthlyStats } from "@/lib/supabase/fetch-reports";
 
 export default function MyPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const { displayName } = useCurrentUser();
+  const { reports } = useReportsFromDb();
+  const { monthlyMinutes, monthlyCount } = useMonthlyStats(reports);
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -26,7 +27,7 @@ export default function MyPage() {
               Mypage
             </p>
             <h1 className="text-[24px] font-bold text-[#353644] leading-[1.5]">
-              {DUMMY_USER_NAME}님
+              {displayName}님
             </h1>
           </div>
 
@@ -36,12 +37,15 @@ export default function MyPage() {
               내 정보
             </h2>
             <div className="space-y-16">
-              
-              {/* 사용 시간 - StatCard와 동일한 그리드 스타일 */}
+              {/* 사용 시간 / 상담 수 - StatCard 그리드 */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <StatCard
-                  value={`${DUMMY_MONTHLY_TIME}분`}
+                  value={`${monthlyMinutes}분`}
                   label="이번 달 사용 시간"
+                />
+                <StatCard
+                  value={`${monthlyCount}개`}
+                  label="이번 달 상담 수"
                 />
               </div>
             </div>

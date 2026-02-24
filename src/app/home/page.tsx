@@ -10,13 +10,10 @@ import StatCard from "@/components/ui/statcard";
 import ReportRow from "@/components/ui/reportrow";
 import TossStyleAlert from "@/components/ui/tossalert";
 import Toast from "@/components/ui/toast";
-import { useReportsFromDb } from "@/lib/supabase/fetch-reports";
+import { useReportsFromDb, useMonthlyStats } from "@/lib/supabase/fetch-reports";
+import { useCurrentUser } from "@/lib/supabase/use-current-user";
 import { createTestReportRow } from "@/lib/supabase/reports";
 import { Mic, Upload, Loader2 } from "lucide-react";
-
-const DUMMY_USER_NAME = "한지훈";
-const DUMMY_MONTHLY_TIME = 240;
-const DUMMY_MONTHLY_COUNT = 6;
 
 // 녹음 아이콘 (바 형태)
 const RecordingIcon = () => (
@@ -40,6 +37,7 @@ const UploadIcon = () => (
 
 export default function HomePage() {
   const router = useRouter();
+  const { displayName } = useCurrentUser();
   const {
     reports,
     isLoading,
@@ -48,6 +46,7 @@ export default function HomePage() {
     justCompletedCount,
     clearJustCompleted,
   } = useReportsFromDb();
+  const { monthlyMinutes, monthlyCount } = useMonthlyStats(reports);
   const generatingReports = reports.filter(
     (r) => r.status === "generating" || r.status === "uploading"
   );
@@ -114,7 +113,7 @@ export default function HomePage() {
               Home
             </p>
             <h1 className="text-[24px] font-bold text-[#353644] leading-[1.5]">
-              안녕하세요, {DUMMY_USER_NAME}님
+              안녕하세요, {displayName}님
             </h1>
           </div>
 
@@ -172,10 +171,10 @@ export default function HomePage() {
             />
 
             {/* 통계 카드: 이번 달 상담 시간 */}
-            <StatCard value={`${DUMMY_MONTHLY_TIME}분`} label="이번 달 상담 시간" />
+            <StatCard value={`${monthlyMinutes}분`} label="이번 달 상담 시간" />
 
             {/* 통계 카드: 이번 달 상담 수 */}
-            <StatCard value={`${DUMMY_MONTHLY_COUNT}개`} label="이번 달 상담 수" />
+            <StatCard value={`${monthlyCount}개`} label="이번 달 상담 수" />
           </div>
 
           {/* 나의 상담 내역 섹션 */}

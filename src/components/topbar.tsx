@@ -7,15 +7,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { ChevronDown, Rocket, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { useCurrentUser } from "@/lib/supabase/use-current-user";
 
 const menuItems = [
   { href: "/home", label: "홈" },
   { href: "/storage", label: "상담 저장소" },
   { href: "/mypage", label: "마이페이지" },
 ];
-
-// 로그인 사용자 이름 (추후 auth 연동 시 교체)
-const DISPLAY_USER_NAME = "한지훈";
 
 interface TopBarProps {
   onMenuClick?: () => void;
@@ -24,6 +22,7 @@ interface TopBarProps {
 export default function TopBar({ onMenuClick }: TopBarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const { displayName } = useCurrentUser();
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -101,7 +100,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
             onClick={() => setUserDropdownOpen((v) => !v)}
             className="flex items-center gap-1 text-[#626474] hover:text-[#1A1A1A] transition-colors text-[14px] font-medium"
           >
-            <span>{DISPLAY_USER_NAME}님</span>
+            <span>{displayName}님</span>
             <ChevronDown
               className={cn("w-4 h-4 transition-transform", userDropdownOpen && "rotate-180")}
             />

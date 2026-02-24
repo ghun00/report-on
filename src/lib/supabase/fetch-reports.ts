@@ -43,6 +43,7 @@ function dbRowToReportItem(row: {
     status: isReportStatus(row.status) ? row.status : "done",
     createdAt,
     error_message: row.error_message ?? undefined,
+    durationSec: row.duration_sec ?? null,
   };
 }
 
@@ -177,5 +178,26 @@ export function useReportsFromDb(): {
     refetch,
     justCompletedCount,
     clearJustCompleted,
+  };
+}
+
+/** 이번 달 보고서 기준 사용 시간(분) / 상담 수 */
+export function useMonthlyStats(
+  reports: { createdAt: number; durationSec?: number | null }[]
+): { monthlyMinutes: number; monthlyCount: number } {
+  const now = new Date();
+  const thisYear = now.getFullYear();
+  const thisMonth = now.getMonth();
+  const thisMonthReports = reports.filter((r) => {
+    const d = new Date(r.createdAt);
+    return d.getFullYear() === thisYear && d.getMonth() === thisMonth;
+  });
+  const totalSec = thisMonthReports.reduce(
+    (sum, r) => sum + (r.durationSec ?? 0),
+    0
+  );
+  return {
+    monthlyMinutes: Math.floor(totalSec / 60),
+    monthlyCount: thisMonthReports.length,
   };
 }

@@ -21,6 +21,8 @@ export interface ReportItem {
   createdAt: number;
   /** 실패 시 서버 메시지 (failed일 때 툴팁 등 표시용) */
   error_message?: string | null;
+  /** 원본 초 단위 (이번 달 통계 등 계산용) */
+  durationSec?: number | null;
 }
 
 interface ReportsContextValue {
