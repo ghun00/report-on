@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 
@@ -17,13 +17,30 @@ function getDisplayName(user: User | null): string {
   return "사용자";
 }
 
+export async function updateUserName(newName: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.auth.updateUser({
+    data: { name: newName },
+  });
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
 export function useCurrentUser(): {
   user: User | null;
   displayName: string;
   isLoading: boolean;
+  refreshUser: () => Promise<void>;
 } {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const refreshUser = useCallback(async () => {
+    const supabase = createClient();
+    const { data: { user: u } } = await supabase.auth.getUser();
+    setUser(u ?? null);
+  }, []);
 
   useEffect(() => {
     const supabase = createClient();
@@ -44,5 +61,6 @@ export function useCurrentUser(): {
     user,
     displayName: getDisplayName(user),
     isLoading,
+    refreshUser,
   };
 }

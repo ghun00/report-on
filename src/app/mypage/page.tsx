@@ -1,17 +1,25 @@
 "use client";
 
 import { useState } from "react";
+import { Pencil } from "lucide-react";
 import TopBar from "@/components/topbar";
 import MobileDrawer from "@/components/mobiledrawer";
 import StatCard from "@/components/ui/statcard";
-import { useCurrentUser } from "@/lib/supabase/use-current-user";
+import EditNameModal from "@/components/ui/edit-name-modal";
+import { useCurrentUser, updateUserName } from "@/lib/supabase/use-current-user";
 import { useReportsFromDb, useMonthlyStats } from "@/lib/supabase/fetch-reports";
 
 export default function MyPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const { displayName } = useCurrentUser();
+  const [isEditNameOpen, setIsEditNameOpen] = useState(false);
+  const { displayName, refreshUser } = useCurrentUser();
   const { reports } = useReportsFromDb();
   const { monthlyMinutes, monthlyCount } = useMonthlyStats(reports);
+
+  const handleNameSave = async (newName: string) => {
+    await updateUserName(newName);
+    await refreshUser();
+  };
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -26,9 +34,18 @@ export default function MyPage() {
             <p className="text-[16px] font-medium text-[#626474] leading-[1.5] mb-2">
               Mypage
             </p>
-            <h1 className="text-[24px] font-bold text-[#353644] leading-[1.5]">
-              {displayName}님
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-[24px] font-bold text-[#353644] leading-[1.5]">
+                {displayName}님
+              </h1>
+              <button
+                onClick={() => setIsEditNameOpen(true)}
+                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                aria-label="이름 변경"
+              >
+                <Pencil className="w-4 h-4 text-[#626474]" />
+              </button>
+            </div>
           </div>
 
           {/* 내 정보 섹션 */}
@@ -55,6 +72,14 @@ export default function MyPage() {
 
       {/* 모바일 Drawer */}
       <MobileDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
+
+      {/* 이름 변경 모달 */}
+      <EditNameModal
+        isOpen={isEditNameOpen}
+        currentName={displayName}
+        onClose={() => setIsEditNameOpen(false)}
+        onSave={handleNameSave}
+      />
     </div>
   );
 }
