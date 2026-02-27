@@ -29,13 +29,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     title: `${displayTitle} | 레포트온`,
     openGraph: {
       title: `${displayTitle} | 레포트온`,
-      description: "AI가 생성한 전문 상담 보고서입니다.",
+      description: `${displayTitle} | 레포트온`,
       type: "article",
     },
     twitter: {
       card: "summary",
       title: `${displayTitle} | 레포트온`,
-      description: "AI가 생성한 전문 상담 보고서입니다.",
+      description: `${displayTitle} | 레포트온`,
     },
   };
 }
