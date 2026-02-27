@@ -3,31 +3,31 @@
 import { useState, useEffect, useRef } from "react";
 import { X } from "lucide-react";
 
-interface EditNameModalProps {
+interface EditTitleModalProps {
   isOpen: boolean;
-  currentName: string;
+  currentTitle: string;
   onClose: () => void;
-  onSave: (newName: string) => Promise<void>;
+  onSave: (newTitle: string) => Promise<void>;
 }
 
-export default function EditNameModal({
+export default function EditTitleModal({
   isOpen,
-  currentName,
+  currentTitle,
   onClose,
   onSave,
-}: EditNameModalProps) {
-  const [name, setName] = useState(currentName);
+}: EditTitleModalProps) {
+  const [title, setTitle] = useState(currentTitle);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isOpen) {
-      setName(currentName);
+      setTitle(currentTitle);
       setError(null);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [isOpen, currentName]);
+  }, [isOpen, currentTitle]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -41,12 +41,12 @@ export default function EditNameModal({
   if (!isOpen) return null;
 
   const handleSave = async () => {
-    const trimmed = name.trim();
+    const trimmed = title.trim();
     if (!trimmed) {
-      setError("이름을 입력해주세요.");
+      setError("제목을 입력해주세요.");
       return;
     }
-    if (trimmed === currentName) {
+    if (trimmed === currentTitle) {
       onClose();
       return;
     }
@@ -57,7 +57,7 @@ export default function EditNameModal({
       await onSave(trimmed);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "이름 변경에 실패했습니다.");
+      setError(err instanceof Error ? err.message : "제목 변경에 실패했습니다.");
     } finally {
       setIsLoading(false);
     }
@@ -80,7 +80,7 @@ export default function EditNameModal({
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6 pb-4">
           <h2 className="text-[18px] font-bold text-[#1A1A1A]">
-            이름 변경
+            상담 보고서 제목 변경
           </h2>
           <button
             onClick={onClose}
@@ -94,17 +94,17 @@ export default function EditNameModal({
         {/* Content */}
         <div className="px-6 pb-6">
           <p className="text-[14px] text-[#666] mb-4">
-            새로운 이름을 입력해주세요.
+            새로운 제목을 입력해주세요.
           </p>
 
           
           <input
             ref={inputRef}
             type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="이름을 입력하세요"
+            placeholder="제목을 입력하세요"
             className="w-full px-4 py-3 border border-gray-300 rounded-lg text-[15px] focus:outline-none focus:ring-2 focus:ring-[#F05705] focus:border-transparent transition-all"
             disabled={isLoading}
           />

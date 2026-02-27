@@ -7,12 +7,14 @@ import Link from "next/link";
 import TopBar from "@/components/topbar";
 import MobileDrawer from "@/components/mobiledrawer";
 import { createClient } from "@/lib/supabase/client";
-import { Link2, ArrowLeft } from "lucide-react";
+import { Link2, ArrowLeft, ExternalLink } from "lucide-react";
 import ReportLayout from "@/components/reports/ReportLayout";
 import ReportMain from "@/components/reports/ReportMain";
 import ReportTOC from "@/components/reports/ReportTOC";
 import TranscriptPanel, { type TranscriptPanelProps } from "@/components/reports/TranscriptPanel";
 import { parseReportJson, TOC_SECTIONS } from "@/components/reports/report-json-types";
+import EditTitleModal from "@/components/ui/edit-title-modal";
+import { updateReportTitle } from "@/lib/supabase/reports";
 
 const notoSansKr = Noto_Sans_KR({
   subsets: ["latin"],
@@ -25,6 +27,8 @@ interface ReportData {
   transcript: string | null;
   error_message: string | null;
   report_json: unknown;
+  created_at: string | null;
+  duration_sec: number | null;
 }
 
 export default function ReportDetailPage() {
@@ -35,13 +39,14 @@ export default function ReportDetailPage() {
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [reportLoadError, setReportLoadError] = useState<string | null>(null);
   const [transcriptMobileOpen, setTranscriptMobileOpen] = useState(false);
+  const [isEditTitleOpen, setIsEditTitleOpen] = useState(false);
 
   useEffect(() => {
     if (!reportId) return;
     const supabase = createClient();
     supabase
       .from("reports")
-      .select("title, status, transcript, error_message, report_json")
+      .select("title, status, transcript, error_message, report_json, created_at, duration_sec")
       .eq("id", reportId)
       .single()
       .then(({ data, error }) => {
@@ -55,6 +60,8 @@ export default function ReportDetailPage() {
           transcript: data?.transcript ?? null,
           error_message: data?.error_message ?? null,
           report_json: data?.report_json ?? null,
+          created_at: data?.created_at ?? null,
+          duration_sec: data?.duration_sec ?? null,
         });
       });
   }, [reportId]);
@@ -81,6 +88,10 @@ export default function ReportDetailPage() {
     const url = typeof window !== "undefined" ? window.location.href : "";
     navigator.clipboard.writeText(url);
   }, []);
+
+  const handleOpenShare = useCallback(() => {
+    window.open(`/share/${reportId}`, "_blank", "noopener,noreferrer");
+  }, [reportId]);
 
   const handleTocNav = useCallback((id: string) => {
     const el = document.getElementById(id);
@@ -110,6 +121,14 @@ export default function ReportDetailPage() {
     // TODO: POST /api/reports/[id]/retry 또는 /api/stt/start 연동
   }, []);
 
+  const handleTitleSave = useCallback(async (newTitle: string) => {
+    const result = await updateReportTitle(reportId, newTitle);
+    if (!result.success) {
+      throw new Error(result.error ?? "제목 변경에 실패했습니다.");
+    }
+    setReportData((prev) => prev ? { ...prev, title: newTitle } : prev);
+  }, [reportId]);
+
   return (
     <div className="min-h-screen bg-[#F6F7F9] flex flex-col">
       <TopBar onMenuClick={() => setIsDrawerOpen(true)} />
@@ -123,13 +142,22 @@ export default function ReportDetailPage() {
             <ArrowLeft className="w-4 h-4" />
             뒤로가기
           </Link>
-          <button
-            onClick={handleCopyUrl}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-transparent hover:bg-gray-400/10 text-[14px] font-medium text-[#F05705] hover:text-[#D04A04] transition-colors"
-          >
-            <Link2 className="w-4 h-4" />
-            URL 복사
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCopyUrl}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-transparent hover:bg-gray-400/10 text-[14px] font-medium text-[#F05705] hover:text-[#D04A04] transition-colors"
+            >
+              <Link2 className="w-4 h-4" />
+              URL 복사
+            </button>
+            <button
+              onClick={handleOpenShare}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#FFF4EE] hover:bg-[#FFE8DB] text-[14px] font-medium text-[#F05705] transition-colors"
+            >
+              <ExternalLink className="w-4 h-4" />
+              공유용 상담 보고서 보기
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 px-4 lg:px-8 xl:px-12 py-8 lg:py-12">
@@ -156,6 +184,9 @@ export default function ReportDetailPage() {
                   errorMessage={errorMessage}
                   fontClassName={notoSansKr.className}
                   onRetry={handleRetry}
+                  onEditTitle={() => setIsEditTitleOpen(true)}
+                  createdAt={reportData?.created_at ?? null}
+                  durationSec={reportData?.duration_sec ?? null}
                 />
               }
               toc={
@@ -171,6 +202,13 @@ export default function ReportDetailPage() {
       </main>
 
       <MobileDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
+
+      <EditTitleModal
+        isOpen={isEditTitleOpen}
+        currentTitle={title}
+        onClose={() => setIsEditTitleOpen(false)}
+        onSave={handleTitleSave}
+      />
     </div>
   );
 }

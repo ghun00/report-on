@@ -124,3 +124,23 @@ export async function createTestReportRow(): Promise<{
   });
 }
 
+/** 보고서 제목 업데이트 */
+export async function updateReportTitle(
+  reportId: string,
+  newTitle: string
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("reports")
+    .update({ title: newTitle })
+    .eq("id", reportId);
+
+  if (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[updateReportTitle]", error);
+    }
+    return { success: false, error: error.message };
+  }
+  return { success: true };
+}
+

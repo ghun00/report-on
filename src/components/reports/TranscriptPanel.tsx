@@ -48,7 +48,7 @@ export default function TranscriptPanel({
       if (transcript) {
         const formatted = formatTranscriptWithLineBreaks(transcript);
         return (
-          <pre className="text-[13px] text-[#666] leading-[1.6] whitespace-pre-wrap break-words font-normal">
+          <pre className="text-[15px] text-[#666] leading-[1.6] whitespace-pre-wrap break-words font-normal">
             {formatted}
           </pre>
         );
@@ -65,7 +65,7 @@ export default function TranscriptPanel({
     if (status === "done" && transcript) {
       const formatted = formatTranscriptWithLineBreaks(transcript);
       return (
-        <pre className="text-[13px] text-[#666] leading-[1.6] whitespace-pre-wrap break-words font-normal">
+        <pre className="text-[15px] text-[#666] leading-[1.6] whitespace-pre-wrap break-words font-normal">
           {formatted}
         </pre>
       );
@@ -82,7 +82,7 @@ export default function TranscriptPanel({
       `}
     >
       <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-2.5 border-b border-[#E5E7EB]">
-        <span className="text-[12px] font-medium text-[#6B7280]">대본(원문)</span>
+        <span className="text-[15px] font-medium text-[#6B7280]">원문</span>
         <div className="flex items-center gap-1">
           {(status === "done" || status === "failed") && transcript && (
             <button
