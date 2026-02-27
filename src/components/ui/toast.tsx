@@ -31,9 +31,9 @@ export default function Toast({
       role="status"
       aria-live="polite"
       className={cn(
-        "fixed bottom-6 left-1/2 -translate-x-1/2 z-[100]",
-        "px-4 py-3 rounded-[12px] bg-[#353644] text-white text-[14px] font-medium shadow-lg",
-        "animate-in fade-in slide-in-from-bottom-2 duration-200",
+        "fixed top-25 left-1/2 -translate-x-1/2 z-[100]",
+        "px-6 py-3 rounded-full bg-[#00C471] text-white text-[16px] font-medium shadow-lg",
+        "animate-in fade-in slide-in-from-top-2 duration-200",
         className
       )}
     >

@@ -15,6 +15,7 @@ import MobileTOCFloat from "@/components/reports/MobileTOCFloat";
 import TranscriptPanel, { type TranscriptPanelProps } from "@/components/reports/TranscriptPanel";
 import { parseReportJson, TOC_SECTIONS } from "@/components/reports/report-json-types";
 import EditTitleModal from "@/components/ui/edit-title-modal";
+import Toast from "@/components/ui/toast";
 import { updateReportTitle } from "@/lib/supabase/reports";
 
 const notoSansKr = Noto_Sans_KR({
@@ -41,6 +42,7 @@ export default function ReportDetailPage() {
   const [reportLoadError, setReportLoadError] = useState<string | null>(null);
   const [transcriptMobileOpen, setTranscriptMobileOpen] = useState(false);
   const [isEditTitleOpen, setIsEditTitleOpen] = useState(false);
+  const [showCopyToast, setShowCopyToast] = useState(false);
 
   useEffect(() => {
     if (!reportId) return;
@@ -86,9 +88,11 @@ export default function ReportDetailPage() {
   }, [transcript]);
 
   const handleCopyUrl = useCallback(() => {
-    const url = typeof window !== "undefined" ? window.location.href : "";
-    navigator.clipboard.writeText(url);
-  }, []);
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const shareUrl = `${origin}/share/${reportId}`;
+    navigator.clipboard.writeText(shareUrl);
+    setShowCopyToast(true);
+  }, [reportId]);
 
   const handleOpenShare = useCallback(() => {
     window.open(`/share/${reportId}`, "_blank", "noopener,noreferrer");
@@ -149,7 +153,7 @@ export default function ReportDetailPage() {
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-transparent hover:bg-gray-400/10 text-[14px] font-medium text-[#F05705] hover:text-[#D04A04] transition-colors"
             >
               <Link2 className="w-4 h-4" />
-              URL 복사
+              보고서 URL 복사
             </button>
             <button
               onClick={handleOpenShare}
@@ -213,6 +217,14 @@ export default function ReportDetailPage() {
 
       {/* 모바일용 플로팅 TOC 버튼 */}
       <MobileTOCFloat activeId={activeSectionId} onNav={handleTocNav} />
+
+      {/* URL 복사 토스트 */}
+      <Toast
+        open={showCopyToast}
+        message="공유용 상담 보고서 링크가 복사되었어요!"
+        onClose={() => setShowCopyToast(false)}
+        autoHideMs={3000}
+      />
     </div>
   );
 }
