@@ -58,6 +58,12 @@ export default function ShareReportPage() {
       });
   }, [reportId]);
 
+  useEffect(() => {
+    if (reportData?.title) {
+      document.title = `${reportData.title} | 레포트온`;
+    }
+  }, [reportData?.title]);
+
   const reportJsonParsed = reportData
     ? parseReportJson(reportData.report_json)
     : null;
