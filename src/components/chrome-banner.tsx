@@ -1,21 +1,29 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { X } from "lucide-react";
 
 const STORAGE_KEY = "report-on-chrome-banner-closed";
 
 export default function ChromeBanner() {
+  const pathname = usePathname();
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
+    // 공유 페이지에서는 배너 숨김
+    if (pathname?.startsWith("/share/")) {
+      setIsVisible(false);
+      return;
+    }
+
     try {
       const closed = localStorage.getItem(STORAGE_KEY);
       setIsVisible(closed !== "true");
     } catch {
       setIsVisible(true);
     }
-  }, []);
+  }, [pathname]);
 
   const handleClose = () => {
     setIsVisible(false);

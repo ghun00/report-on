@@ -11,6 +11,7 @@ import { Link2, ArrowLeft, ExternalLink } from "lucide-react";
 import ReportLayout from "@/components/reports/ReportLayout";
 import ReportMain from "@/components/reports/ReportMain";
 import ReportTOC from "@/components/reports/ReportTOC";
+import MobileTOCFloat from "@/components/reports/MobileTOCFloat";
 import TranscriptPanel, { type TranscriptPanelProps } from "@/components/reports/TranscriptPanel";
 import { parseReportJson, TOC_SECTIONS } from "@/components/reports/report-json-types";
 import EditTitleModal from "@/components/ui/edit-title-modal";
@@ -209,6 +210,9 @@ export default function ReportDetailPage() {
         onClose={() => setIsEditTitleOpen(false)}
         onSave={handleTitleSave}
       />
+
+      {/* 모바일용 플로팅 TOC 버튼 */}
+      <MobileTOCFloat activeId={activeSectionId} onNav={handleTocNav} />
     </div>
   );
 }

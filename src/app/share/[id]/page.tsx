@@ -6,6 +6,7 @@ import { Noto_Sans_KR } from "next/font/google";
 import { Loader2 } from "lucide-react";
 import ReportMain from "@/components/reports/ReportMain";
 import ReportTOC from "@/components/reports/ReportTOC";
+import MobileTOCFloat from "@/components/reports/MobileTOCFloat";
 import { parseReportJson, TOC_SECTIONS } from "@/components/reports/report-json-types";
 
 const notoSansKr = Noto_Sans_KR({
@@ -161,11 +162,15 @@ export default function ShareReportPage() {
                 activeId={activeSectionId}
                 onNav={handleTocNav}
                 fontClassName={notoSansKr.className}
+                stickyTop="3rem"
               />
             </div>
           </div>
         </div>
       </main>
+
+      {/* 모바일용 플로팅 TOC 버튼 */}
+      <MobileTOCFloat activeId={activeSectionId} onNav={handleTocNav} />
     </div>
   );
 }

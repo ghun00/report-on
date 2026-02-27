@@ -7,19 +7,21 @@ interface ReportTOCProps {
   activeId: string | null;
   onNav: (id: string) => void;
   fontClassName?: string;
+  stickyTop?: string;
 }
 
 export default function ReportTOC({
   activeId,
   onNav,
   fontClassName = "",
+  stickyTop = "12rem",
 }: ReportTOCProps) {
   return (
     <aside
       className={cn("hidden lg:block w-[220px] shrink-0", fontClassName)}
       aria-label="목차"
     >
-      <div className="sticky top-[12rem]">
+      <div className="sticky" style={{ top: stickyTop }}>
         <nav className="flex flex-col gap-1">
           {TOC_SECTIONS.map((s) => {
             const isActive = activeId === s.id;
