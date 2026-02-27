@@ -74,7 +74,7 @@ export default function ShareReportPage() {
   useEffect(() => {
     if (!reportJsonParsed) return;
 
-    const ids = TOC_SECTIONS.map((s) => s.id);
+    const ids: string[] = TOC_SECTIONS.map((s) => s.id);
     const observer = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
