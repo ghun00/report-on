@@ -183,19 +183,25 @@ export function useReportsFromDb(): {
 
 /** 이번 달 보고서 기준 사용 시간(분) / 상담 수 */
 export function useMonthlyStats(
-  reports: { createdAt: number; durationSec?: number | null }[]
+  reports: { createdAt: number; durationSec?: number | null; status?: string }[]
 ): { monthlyMinutes: number; monthlyCount: number } {
   const now = new Date();
   const thisYear = now.getFullYear();
   const thisMonth = now.getMonth();
+
+  // 이번 달에 생성된 보고서 (generating/uploading 제외)
   const thisMonthReports = reports.filter((r) => {
     const d = new Date(r.createdAt);
-    return d.getFullYear() === thisYear && d.getMonth() === thisMonth;
+    const isThisMonth = d.getFullYear() === thisYear && d.getMonth() === thisMonth;
+    const isCompleted = r.status !== "generating" && r.status !== "uploading";
+    return isThisMonth && isCompleted;
   });
+
   const totalSec = thisMonthReports.reduce(
     (sum, r) => sum + (r.durationSec ?? 0),
     0
   );
+
   return {
     monthlyMinutes: Math.floor(totalSec / 60),
     monthlyCount: thisMonthReports.length,

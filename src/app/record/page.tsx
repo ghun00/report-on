@@ -144,11 +144,15 @@ export default function RecordPage() {
   const [showMicError, setShowMicError] = useState(false);
   const [showShortRecording, setShowShortRecording] = useState(false);
 
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastReportId, setLastReportId] = useState<string | null>(null);
+  
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastFailedBlobRef = useRef<Blob | null>(null);
+  const lastDurationSecRef = useRef<number>(0);
 
   // ─── 타이머 시작/정지 ─────────────────────────────────────────────────────
   const startTimer = useCallback(() => {
@@ -273,36 +277,46 @@ export default function RecordPage() {
   }, [state, elapsedSeconds]);
 
   const runSaveAndFinish = useCallback(
-    async (blob: Blob) => {
+    async (blob: Blob, retryReportId?: string) => {
       lastFailedBlobRef.current = blob;
-      const dateStr = new Date().toLocaleDateString("ko-KR", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).replace(/\. /g, ".").trim();
+      lastDurationSecRef.current = elapsedSeconds;
+      setErrorMessage(null);
+      
       const title = "상담 보고서";
+      let reportId = retryReportId;
 
-      const createResult = await createReportRow({
-        title,
-        durationSec: elapsedSeconds,
-        status: "generating",
-      });
-      if (!createResult.success || !createResult.id) {
-        setState("error");
-        return;
+      if (!reportId) {
+        const createResult = await createReportRow({
+          title,
+          durationSec: elapsedSeconds,
+          status: "generating",
+        });
+        if (!createResult.success || !createResult.id) {
+          setErrorMessage("보고서 생성에 실패했습니다.");
+          setState("error");
+          return;
+        }
+        reportId = createResult.id;
       }
-      const reportId = createResult.id;
+      setLastReportId(reportId);
 
       const supabase = createClient();
-      const audioPath = await uploadRecordingBlob(supabase, reportId, blob);
-      if (!audioPath) {
-        await updateReportFailed(reportId, "upload failed: storage error");
+      const uploadResult = await uploadRecordingBlob(supabase, reportId, blob, elapsedSeconds);
+      
+      if (!uploadResult.success) {
+        const errMsg = `upload failed: ${uploadResult.error ?? "unknown error"}`;
+        console.error(`[runSaveAndFinish] ${errMsg}`, uploadResult.errorDetails);
+        await updateReportFailed(reportId, errMsg);
+        setErrorMessage(uploadResult.error ?? "업로드에 실패했습니다.");
         setState("error");
         return;
       }
-      const updateResult = await updateReportAfterUpload(reportId, audioPath);
+      
+      const updateResult = await updateReportAfterUpload(reportId, uploadResult.path!);
       if (!updateResult.success) {
-        await updateReportFailed(reportId, updateResult.error ?? "update failed");
+        const errMsg = updateResult.error ?? "update failed";
+        await updateReportFailed(reportId, errMsg);
+        setErrorMessage(errMsg);
         setState("error");
         return;
       }
@@ -367,11 +381,12 @@ export default function RecordPage() {
       return;
     }
     setState("phaseA");
+    setErrorMessage(null);
     (async () => {
       await new Promise((r) => setTimeout(r, 600));
-      await runSaveAndFinish(blob);
+      await runSaveAndFinish(blob, lastReportId ?? undefined);
     })();
-  }, [runSaveAndFinish, router]);
+  }, [runSaveAndFinish, router, lastReportId]);
 
   // ─── 중앙 버튼 핸들러 ──────────────────────────────────────────────────────
   const handleCenterButton = useCallback(() => {
@@ -434,17 +449,22 @@ export default function RecordPage() {
         {state === "error" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
             <p className="text-[22px] font-bold text-white mb-2">
-              저장에 실패했어요
+              업로드에 실패했어요
             </p>
-            <p className="text-[15px] text-[#9395A6] mb-8 text-center max-w-[280px]">
+            <p className="text-[15px] text-[#9395A6] mb-4 text-center max-w-[320px]">
               네트워크 상태를 확인하고 다시 시도해 주세요.
             </p>
+            {errorMessage && (
+              <p className="text-[13px] text-[#6B7280] mb-6 text-center max-w-[320px] bg-[#1A1A1A] px-4 py-2 rounded-lg font-mono">
+                {errorMessage}
+              </p>
+            )}
             <div className="flex flex-col gap-3 w-full max-w-[320px]">
               <button
                 onClick={handleRetrySave}
                 className="w-full rounded-xl bg-[#F05705] hover:bg-[#D04A04] py-3.5 text-[15px] font-semibold text-white transition-colors active:opacity-95"
               >
-                다시 시도
+                업로드 재시도
               </button>
               <button
                 onClick={() => router.push("/home")}
