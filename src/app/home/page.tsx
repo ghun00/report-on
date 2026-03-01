@@ -14,6 +14,7 @@ import { useReportsFromDb, useMonthlyStats } from "@/lib/supabase/fetch-reports"
 import { useCurrentUser } from "@/lib/supabase/use-current-user";
 import { createTestReportRow } from "@/lib/supabase/reports";
 import { Mic, Upload, Loader2 } from "lucide-react";
+import PendingUploadsBanner from "@/components/pending-uploads-banner";
 
 // 녹음 아이콘 (바 형태)
 const RecordingIcon = () => (
@@ -120,6 +121,9 @@ export default function HomePage() {
           {error && (
             <p className="mb-4 text-sm text-red-600">보고서 목록을 불러오지 못했어요.</p>
           )}
+
+          {/* 임시 저장된 녹음 배너 */}
+          <PendingUploadsBanner />
 
           {/* 진행중 카드 (생성중이 하나라도 있을 때) */}
           {generatingReports.length > 0 && (

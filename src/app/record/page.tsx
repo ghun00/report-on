@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import TossStyleAlert from "@/components/ui/tossalert";
+import Toast from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 import {
   createReportRow,
@@ -10,15 +11,18 @@ import {
   updateReportFailed,
   updateReportErrorMessage,
 } from "@/lib/supabase/reports";
-import { uploadRecordingBlob } from "@/lib/supabase/upload-recording";
-import { Pause, Play } from "lucide-react";
+import { uploadRecordingBlob, type UploadProgress } from "@/lib/supabase/upload-recording";
+import { saveRecording } from "@/lib/local-recordings";
+import { useNetworkStatus } from "@/lib/hooks/use-network-status";
+import { Pause, Play, WifiOff, Loader2 } from "lucide-react";
 
 type RecordingState =
   | "recording"
   | "paused"
   | "phaseA"
+  | "uploading"
   | "aiWorking"
-  | "error";
+  | "upload_failed";
 
 // ─── 애니메이션 바 컴포넌트 ─────────────────────────────────────────────────
 function Bars({
@@ -137,15 +141,20 @@ function formatTime(seconds: number): string {
 // ─── 메인 녹음 페이지 ───────────────────────────────────────────────────────
 export default function RecordPage() {
   const router = useRouter();
+  const { isOnline } = useNetworkStatus();
+  
   const [state, setState] = useState<RecordingState>("recording");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const [showMicError, setShowMicError] = useState(false);
   const [showShortRecording, setShowShortRecording] = useState(false);
-
+  
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastReportId, setLastReportId] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [showSavedToast, setShowSavedToast] = useState(false);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -188,13 +197,14 @@ export default function RecordPage() {
       };
 
       mediaRecorder.onerror = () => {
-        setState("error");
+        setState("upload_failed");
+        setErrorMessage("녹음 중 오류가 발생했습니다.");
       };
 
       mediaRecorder.start();
       setState("recording");
       startTimer();
-    } catch (err) {
+    } catch {
       setShowMicError(true);
     }
   }, [startTimer]);
@@ -251,7 +261,7 @@ export default function RecordPage() {
 
   // ─── 취소 핸들러 ──────────────────────────────────────────────────────────
   const handleCancel = useCallback(() => {
-    if (state === "phaseA" || state === "aiWorking" || state === "error") return;
+    if (state === "phaseA" || state === "uploading" || state === "aiWorking" || state === "upload_failed") return;
     setShowCancelConfirm(true);
   }, [state]);
 
@@ -268,7 +278,7 @@ export default function RecordPage() {
 
   // ─── 종료 핸들러 ──────────────────────────────────────────────────────────
   const handleFinish = useCallback(() => {
-    if (state === "phaseA" || state === "aiWorking" || state === "error") return;
+    if (state === "phaseA" || state === "uploading" || state === "aiWorking" || state === "upload_failed") return;
     if (elapsedSeconds < 30) {
       setShowShortRecording(true);
       return;
@@ -276,11 +286,19 @@ export default function RecordPage() {
     setShowFinishConfirm(true);
   }, [state, elapsedSeconds]);
 
+  // ─── 업로드 진행 콜백 ───────────────────────────────────────────────────
+  const handleUploadProgress = useCallback((progress: UploadProgress) => {
+    setUploadProgress(progress);
+  }, []);
+
+  // ─── 업로드 및 저장 ─────────────────────────────────────────────────────
   const runSaveAndFinish = useCallback(
     async (blob: Blob, retryReportId?: string) => {
       lastFailedBlobRef.current = blob;
-      lastDurationSecRef.current = elapsedSeconds;
+      lastDurationSecRef.current = elapsedSeconds || lastDurationSecRef.current;
       setErrorMessage(null);
+      setUploadProgress(null);
+      setState("uploading");
       
       const title = "상담 보고서";
       let reportId = retryReportId;
@@ -288,12 +306,12 @@ export default function RecordPage() {
       if (!reportId) {
         const createResult = await createReportRow({
           title,
-          durationSec: elapsedSeconds,
+          durationSec: lastDurationSecRef.current,
           status: "generating",
         });
         if (!createResult.success || !createResult.id) {
           setErrorMessage("보고서 생성에 실패했습니다.");
-          setState("error");
+          setState("upload_failed");
           return;
         }
         reportId = createResult.id;
@@ -301,14 +319,20 @@ export default function RecordPage() {
       setLastReportId(reportId);
 
       const supabase = createClient();
-      const uploadResult = await uploadRecordingBlob(supabase, reportId, blob, elapsedSeconds);
+      const uploadResult = await uploadRecordingBlob(
+        supabase, 
+        reportId, 
+        blob, 
+        lastDurationSecRef.current,
+        handleUploadProgress
+      );
       
       if (!uploadResult.success) {
         const errMsg = `upload failed: ${uploadResult.error ?? "unknown error"}`;
         console.error(`[runSaveAndFinish] ${errMsg}`, uploadResult.errorDetails);
         await updateReportFailed(reportId, errMsg);
         setErrorMessage(uploadResult.error ?? "업로드에 실패했습니다.");
-        setState("error");
+        setState("upload_failed");
         return;
       }
       
@@ -317,7 +341,7 @@ export default function RecordPage() {
         const errMsg = updateResult.error ?? "update failed";
         await updateReportFailed(reportId, errMsg);
         setErrorMessage(errMsg);
-        setState("error");
+        setState("upload_failed");
         return;
       }
 
@@ -339,7 +363,7 @@ export default function RecordPage() {
 
       setState("aiWorking");
     },
-    [elapsedSeconds]
+    [elapsedSeconds, handleUploadProgress]
   );
 
   const handleFinishConfirm = useCallback(() => {
@@ -350,7 +374,8 @@ export default function RecordPage() {
     (async () => {
       const blob = await stopRecording();
       if (!blob) {
-        setState("error");
+        setState("upload_failed");
+        setErrorMessage("녹음 데이터를 가져올 수 없습니다.");
         return;
       }
       await new Promise((r) => setTimeout(r, 800));
@@ -366,7 +391,8 @@ export default function RecordPage() {
     (async () => {
       const blob = await stopRecording();
       if (!blob) {
-        setState("error");
+        setState("upload_failed");
+        setErrorMessage("녹음 데이터를 가져올 수 없습니다.");
         return;
       }
       await new Promise((r) => setTimeout(r, 800));
@@ -374,19 +400,54 @@ export default function RecordPage() {
     })();
   }, [stopRecording, stopTimer, runSaveAndFinish]);
 
+  // ─── 업로드 재시도 ─────────────────────────────────────────────────────
   const handleRetrySave = useCallback(() => {
     const blob = lastFailedBlobRef.current;
     if (!blob) {
       router.push("/home");
       return;
     }
-    setState("phaseA");
+    
+    if (!isOnline) {
+      setErrorMessage("네트워크에 연결되어 있지 않습니다. 연결 후 다시 시도해주세요.");
+      return;
+    }
+    
+    setIsRetrying(true);
     setErrorMessage(null);
+    setState("uploading");
+    
     (async () => {
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 300));
       await runSaveAndFinish(blob, lastReportId ?? undefined);
+      setIsRetrying(false);
     })();
-  }, [runSaveAndFinish, router, lastReportId]);
+  }, [runSaveAndFinish, router, lastReportId, isOnline]);
+
+  // ─── 나중에 업로드 (IndexedDB 저장) ────────────────────────────────────
+  const handleSaveForLater = useCallback(async () => {
+    const blob = lastFailedBlobRef.current;
+    const reportId = lastReportId;
+    
+    if (!blob || !reportId) {
+      router.push("/home");
+      return;
+    }
+    
+    try {
+      await saveRecording(reportId, blob, {
+        durationSec: lastDurationSecRef.current,
+        title: "상담 보고서",
+      });
+      setShowSavedToast(true);
+      setTimeout(() => {
+        router.push("/home");
+      }, 2000);
+    } catch (err) {
+      console.error("[handleSaveForLater] Failed to save to IndexedDB:", err);
+      setErrorMessage("임시 저장에 실패했습니다. 다시 시도해주세요.");
+    }
+  }, [lastReportId, router]);
 
   // ─── 중앙 버튼 핸들러 ──────────────────────────────────────────────────────
   const handleCenterButton = useCallback(() => {
@@ -408,15 +469,37 @@ export default function RecordPage() {
     }
   };
 
+  const getUploadStatusText = () => {
+    if (!uploadProgress) return "업로드 준비 중...";
+    
+    switch (uploadProgress.status) {
+      case "uploading":
+        return uploadProgress.attempt > 1 
+          ? `업로드 중... (${uploadProgress.attempt}/${uploadProgress.maxAttempts}차 시도)`
+          : "업로드 중...";
+      case "retrying":
+        return `재시도 대기 중... (${Math.ceil((uploadProgress.delayMs ?? 0) / 1000)}초 후 ${uploadProgress.attempt}/${uploadProgress.maxAttempts}차 시도)`;
+      default:
+        return "업로드 중...";
+    }
+  };
+
   const isAnimating = state === "recording";
-  const isPhaseA = state === "phaseA" || state === "aiWorking";
-  const isDisabled =
-    state === "phaseA" || state === "aiWorking" || state === "error";
+  const isPhaseA = state === "phaseA" || state === "uploading" || state === "aiWorking";
+  const isDisabled = state === "phaseA" || state === "uploading" || state === "aiWorking" || state === "upload_failed";
 
   return (
     <div className="min-h-screen bg-[#0F0F0F] flex flex-col items-center justify-center relative w-full">
+      {/* 오프라인 배너 */}
+      {!isOnline && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-[#EF4444] text-white text-center py-2 text-[14px] font-medium flex items-center justify-center gap-2">
+          <WifiOff className="w-4 h-4" />
+          네트워크 연결이 불안정합니다
+        </div>
+      )}
+      
       {/* 상단 취소/종료 버튼 (검정 배경 위) */}
-      <div className="absolute top-0 left-0 right-0 z-40 flex items-center justify-between px-4 lg:px-8 py-4 lg:py-6">
+      <div className={`absolute ${!isOnline ? 'top-10' : 'top-0'} left-0 right-0 z-40 flex items-center justify-between px-4 lg:px-8 py-4 lg:py-6`}>
         <button
           onClick={handleCancel}
           disabled={isDisabled}
@@ -445,39 +528,56 @@ export default function RecordPage() {
 
       {/* 메인 콘텐츠 영역 */}
       <div className="flex flex-col items-center justify-center px-4 py-8 w-full max-w-7xl mx-auto relative">
-        {/* Error 전용 오버레이 */}
-        {state === "error" && (
+        {/* Upload Failed 전용 오버레이 */}
+        {state === "upload_failed" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
             <p className="text-[22px] font-bold text-white mb-2">
               업로드에 실패했어요
             </p>
             <p className="text-[15px] text-[#9395A6] mb-4 text-center max-w-[320px]">
-              네트워크 상태를 확인하고 다시 시도해 주세요.
+              네트워크가 불안정하면 업로드가 끊길 수 있어요.
+              <br />다시 시도해 주세요.
             </p>
             {errorMessage && (
-              <p className="text-[13px] text-[#6B7280] mb-6 text-center max-w-[320px] bg-[#1A1A1A] px-4 py-2 rounded-lg font-mono">
+              <p className="text-[13px] text-[#6B7280] mb-6 text-center max-w-[360px] bg-[#1A1A1A] px-4 py-2 rounded-lg font-mono break-all">
                 {errorMessage}
               </p>
             )}
             <div className="flex flex-col gap-3 w-full max-w-[320px]">
               <button
                 onClick={handleRetrySave}
-                className="w-full rounded-xl bg-[#F05705] hover:bg-[#D04A04] py-3.5 text-[15px] font-semibold text-white transition-colors active:opacity-95"
+                disabled={isRetrying}
+                className="w-full rounded-xl bg-[#F05705] hover:bg-[#D04A04] disabled:bg-[#4A4A4A] py-3.5 text-[15px] font-semibold text-white transition-colors active:opacity-95 flex items-center justify-center gap-2"
               >
-                업로드 재시도
+                {isRetrying ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    재시도 중...
+                  </>
+                ) : (
+                  "다시 업로드"
+                )}
+              </button>
+              <button
+                onClick={handleSaveForLater}
+                disabled={isRetrying}
+                className="w-full rounded-xl bg-[#2A2A2A] hover:bg-[#3A3A3A] disabled:bg-[#1A1A1A] py-3.5 text-[15px] font-semibold text-white transition-colors active:opacity-95"
+              >
+                나중에 업로드
               </button>
               <button
                 onClick={() => router.push("/home")}
-                className="w-full rounded-xl bg-[#F3F4FA] hover:bg-[#E5E7EB] py-3.5 text-[15px] font-semibold text-[#191F28] transition-colors active:opacity-95"
+                disabled={isRetrying}
+                className="w-full rounded-xl bg-transparent hover:bg-[#1A1A1A] py-3 text-[14px] font-medium text-[#9395A6] transition-colors"
               >
-                홈으로 가기
+                홈으로 가기 (녹음 삭제)
               </button>
             </div>
           </div>
         )}
 
-        {/* 녹음/Phase A/aiWorking UI */}
-        <div className={`flex flex-col items-center justify-center w-full ${state === "error" ? "invisible" : ""}`}>
+        {/* 녹음/Phase A/uploading/aiWorking UI */}
+        <div className={`flex flex-col items-center justify-center w-full ${state === "upload_failed" ? "invisible" : ""}`}>
           {/* 파형 + 펄스 (phaseA 시 수축) */}
           <div className="relative mb-8 flex flex-col items-center w-full">
             <div className="mb-8 flex justify-center w-full">
@@ -487,7 +587,7 @@ export default function RecordPage() {
           </div>
 
           {/* recording/paused: 타이머 + 일시정지 버튼 */}
-          {!(state === "phaseA" || state === "aiWorking") && (
+          {!(state === "phaseA" || state === "uploading" || state === "aiWorking") && (
             <>
               <div className="flex flex-col gap-1 items-center mb-12 w-full">
                 <p className="text-[#E4E6F0] text-[24px] font-semibold leading-[1.5]">
@@ -519,8 +619,33 @@ export default function RecordPage() {
             </>
           )}
 
-          {/* phaseA / aiWorking: 상담 보고서 생성 안내 + 홈으로 가기 */}
-          {(state === "phaseA" || state === "aiWorking") && (
+          {/* phaseA / uploading: 업로드 진행 중 */}
+          {(state === "phaseA" || state === "uploading") && (
+            <div className="flex flex-col items-center w-full max-w-[320px]">
+              <p className="text-[22px] lg:text-[28px] font-bold text-white mb-2 text-center">
+                녹음 파일을 업로드하고 있어요
+              </p>
+              <p className="text-[15px] lg:text-[18px] text-[#E4E6F0] mb-4 text-center">
+                {getUploadStatusText()}
+              </p>
+              <div className="w-full bg-[#2A2A2A] rounded-full h-2 mb-4">
+                <div 
+                  className="bg-[#F05705] h-2 rounded-full transition-all duration-300"
+                  style={{ 
+                    width: uploadProgress 
+                      ? `${Math.min((uploadProgress.attempt / uploadProgress.maxAttempts) * 100, 100)}%`
+                      : "10%" 
+                  }}
+                />
+              </div>
+              <p className="text-[13px] lg:text-[15px] text-[#9395A6] text-center">
+                잠시만 기다려주세요...
+              </p>
+            </div>
+          )}
+
+          {/* aiWorking: 상담 보고서 생성 안내 + 홈으로 가기 */}
+          {state === "aiWorking" && (
             <div className="flex flex-col items-center w-full max-w-[320px]">
               <p className="text-[22px] lg:text-[28px] font-bold text-white mb-2 text-center">
                 상담 보고서를 만들고 있어요
@@ -585,8 +710,15 @@ export default function RecordPage() {
           buttonText="홈으로"
           type="warning"
         />
-
       </div>
+      
+      {/* 임시 저장 완료 토스트 */}
+      <Toast
+        open={showSavedToast}
+        message="기기에 임시 저장했어요. 네트워크가 좋아지면 업로드를 재개할 수 있어요."
+        onClose={() => setShowSavedToast(false)}
+        autoHideMs={3000}
+      />
     </div>
   );
 }
