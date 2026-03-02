@@ -11,7 +11,7 @@ import {
   updateReportFailed,
   updateReportErrorMessage,
 } from "@/lib/supabase/reports";
-import { uploadRecordingBlob, type UploadProgress } from "@/lib/supabase/upload-recording";
+import { uploadRecordingBlob } from "@/lib/supabase/upload-recording";
 import { saveRecording } from "@/lib/local-recordings";
 import { useNetworkStatus } from "@/lib/hooks/use-network-status";
 import { Pause, Play, WifiOff, Loader2 } from "lucide-react";
@@ -19,9 +19,7 @@ import { Pause, Play, WifiOff, Loader2 } from "lucide-react";
 type RecordingState =
   | "recording"
   | "paused"
-  | "phaseA"
-  | "uploading"
-  | "aiWorking"
+  | "processing"
   | "upload_failed";
 
 // ─── 애니메이션 바 컴포넌트 ─────────────────────────────────────────────────
@@ -152,7 +150,6 @@ export default function RecordPage() {
   
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastReportId, setLastReportId] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const [showSavedToast, setShowSavedToast] = useState(false);
   
@@ -261,7 +258,7 @@ export default function RecordPage() {
 
   // ─── 취소 핸들러 ──────────────────────────────────────────────────────────
   const handleCancel = useCallback(() => {
-    if (state === "phaseA" || state === "uploading" || state === "aiWorking" || state === "upload_failed") return;
+    if (state === "processing" || state === "upload_failed") return;
     setShowCancelConfirm(true);
   }, [state]);
 
@@ -278,7 +275,7 @@ export default function RecordPage() {
 
   // ─── 종료 핸들러 ──────────────────────────────────────────────────────────
   const handleFinish = useCallback(() => {
-    if (state === "phaseA" || state === "uploading" || state === "aiWorking" || state === "upload_failed") return;
+    if (state === "processing" || state === "upload_failed") return;
     if (elapsedSeconds < 30) {
       setShowShortRecording(true);
       return;
@@ -286,19 +283,13 @@ export default function RecordPage() {
     setShowFinishConfirm(true);
   }, [state, elapsedSeconds]);
 
-  // ─── 업로드 진행 콜백 ───────────────────────────────────────────────────
-  const handleUploadProgress = useCallback((progress: UploadProgress) => {
-    setUploadProgress(progress);
-  }, []);
-
   // ─── 업로드 및 저장 ─────────────────────────────────────────────────────
   const runSaveAndFinish = useCallback(
     async (blob: Blob, retryReportId?: string) => {
       lastFailedBlobRef.current = blob;
       lastDurationSecRef.current = elapsedSeconds || lastDurationSecRef.current;
       setErrorMessage(null);
-      setUploadProgress(null);
-      setState("uploading");
+      setState("processing");
       
       const title = "상담 보고서";
       let reportId = retryReportId;
@@ -323,8 +314,7 @@ export default function RecordPage() {
         supabase, 
         reportId, 
         blob, 
-        lastDurationSecRef.current,
-        handleUploadProgress
+        lastDurationSecRef.current
       );
       
       if (!uploadResult.success) {
@@ -360,15 +350,13 @@ export default function RecordPage() {
       } catch {
         await updateReportErrorMessage(reportId, "worker trigger failed");
       }
-
-      setState("aiWorking");
     },
-    [elapsedSeconds, handleUploadProgress]
+    [elapsedSeconds]
   );
 
   const handleFinishConfirm = useCallback(() => {
     setShowFinishConfirm(false);
-    setState("phaseA");
+    setState("processing");
     stopTimer();
 
     (async () => {
@@ -385,7 +373,7 @@ export default function RecordPage() {
 
   const handleShortRecordingConfirm = useCallback(() => {
     setShowShortRecording(false);
-    setState("phaseA");
+    setState("processing");
     stopTimer();
 
     (async () => {
@@ -415,7 +403,7 @@ export default function RecordPage() {
     
     setIsRetrying(true);
     setErrorMessage(null);
-    setState("uploading");
+    setState("processing");
     
     (async () => {
       await new Promise((r) => setTimeout(r, 300));
@@ -469,24 +457,9 @@ export default function RecordPage() {
     }
   };
 
-  const getUploadStatusText = () => {
-    if (!uploadProgress) return "업로드 준비 중...";
-    
-    switch (uploadProgress.status) {
-      case "uploading":
-        return uploadProgress.attempt > 1 
-          ? `업로드 중... (${uploadProgress.attempt}/${uploadProgress.maxAttempts}차 시도)`
-          : "업로드 중...";
-      case "retrying":
-        return `재시도 대기 중... (${Math.ceil((uploadProgress.delayMs ?? 0) / 1000)}초 후 ${uploadProgress.attempt}/${uploadProgress.maxAttempts}차 시도)`;
-      default:
-        return "업로드 중...";
-    }
-  };
-
   const isAnimating = state === "recording";
-  const isPhaseA = state === "phaseA" || state === "uploading" || state === "aiWorking";
-  const isDisabled = state === "phaseA" || state === "uploading" || state === "aiWorking" || state === "upload_failed";
+  const isProcessing = state === "processing";
+  const isDisabled = state === "processing" || state === "upload_failed";
 
   return (
     <div className="min-h-screen bg-[#0F0F0F] flex flex-col items-center justify-center relative w-full">
@@ -576,18 +549,18 @@ export default function RecordPage() {
           </div>
         )}
 
-        {/* 녹음/Phase A/uploading/aiWorking UI */}
+        {/* 녹음/Processing UI */}
         <div className={`flex flex-col items-center justify-center w-full ${state === "upload_failed" ? "invisible" : ""}`}>
-          {/* 파형 + 펄스 (phaseA 시 수축) */}
+          {/* 파형 + 펄스 (processing 시 수축) */}
           <div className="relative mb-8 flex flex-col items-center w-full">
             <div className="mb-8 flex justify-center w-full">
-              <Bars isAnimating={isAnimating} isPhaseA={isPhaseA} />
+              <Bars isAnimating={isAnimating} isPhaseA={isProcessing} />
             </div>
-            <CenterPulse show={isPhaseA} />
+            <CenterPulse show={isProcessing} />
           </div>
 
           {/* recording/paused: 타이머 + 일시정지 버튼 */}
-          {!(state === "phaseA" || state === "uploading" || state === "aiWorking") && (
+          {!isProcessing && (
             <>
               <div className="flex flex-col gap-1 items-center mb-12 w-full">
                 <p className="text-[#E4E6F0] text-[24px] font-semibold leading-[1.5]">
@@ -619,33 +592,8 @@ export default function RecordPage() {
             </>
           )}
 
-          {/* phaseA / uploading: 업로드 진행 중 */}
-          {(state === "phaseA" || state === "uploading") && (
-            <div className="flex flex-col items-center w-full max-w-[320px]">
-              <p className="text-[22px] lg:text-[28px] font-bold text-white mb-2 text-center">
-                녹음 파일을 업로드하고 있어요
-              </p>
-              <p className="text-[15px] lg:text-[18px] text-[#E4E6F0] mb-4 text-center">
-                {getUploadStatusText()}
-              </p>
-              <div className="w-full bg-[#2A2A2A] rounded-full h-2 mb-4">
-                <div 
-                  className="bg-[#F05705] h-2 rounded-full transition-all duration-300"
-                  style={{ 
-                    width: uploadProgress 
-                      ? `${Math.min((uploadProgress.attempt / uploadProgress.maxAttempts) * 100, 100)}%`
-                      : "10%" 
-                  }}
-                />
-              </div>
-              <p className="text-[13px] lg:text-[15px] text-[#9395A6] text-center">
-                잠시만 기다려주세요...
-              </p>
-            </div>
-          )}
-
-          {/* aiWorking: 상담 보고서 생성 안내 + 홈으로 가기 */}
-          {state === "aiWorking" && (
+          {/* processing: 상담 보고서 생성 안내 + 홈으로 가기 */}
+          {isProcessing && (
             <div className="flex flex-col items-center w-full max-w-[320px]">
               <p className="text-[22px] lg:text-[28px] font-bold text-white mb-2 text-center">
                 상담 보고서를 만들고 있어요
