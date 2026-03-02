@@ -48,15 +48,7 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
       className="sticky top-0 z-40 w-full bg-white/20 backdrop-blur-sm flex items-center justify-between px-4 lg:px-12 h-14 lg:h-16 border-b border-gray-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.06)]"
     >
       {/* 좌측: 로고 */}
-      <div className="flex items-center gap-4 shrink-0">
-        <button
-          type="button"
-          onClick={onMenuClick}
-          className="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors text-[#353644]"
-          aria-label="메뉴 열기"
-        >
-          <Menu className="w-6 h-6" />
-        </button>
+      <div className="flex items-center shrink-0">
         <Link href="/home" className="flex items-center">
           <Image
             src="/logo.png"
@@ -91,10 +83,20 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
         })}
       </nav>
 
-      {/* 우측: 사용자 + PRO + 플랜 업그레이드 */}
+      {/* 우측: 모바일 - 햄버거 메뉴만 / PC - 사용자 + PRO + 플랜 업그레이드 */}
       <div className="flex items-center gap-3 lg:gap-4 shrink-0">
-        {/* 사용자 이름 + chevron (드롭다운) */}
-        <div className="relative" ref={dropdownRef}>
+        {/* 모바일 햄버거 메뉴 */}
+        <button
+          type="button"
+          onClick={onMenuClick}
+          className="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors text-[#353644]"
+          aria-label="메뉴 열기"
+        >
+          <Menu className="w-6 h-6" />
+        </button>
+
+        {/* PC 전용: 사용자 이름 + chevron (드롭다운) */}
+        <div className="relative hidden lg:block" ref={dropdownRef}>
           <button
             type="button"
             onClick={() => setUserDropdownOpen((v) => !v)}
@@ -124,15 +126,15 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
           </div>
         </div>
 
-        {/* PRO 배지 */}
-        <span className="px-4 py-1 rounded-[99px] bg-[#ADD8E6]/30 text-[#2563EB] text-[12px] font-bold">
+        {/* PC 전용: PRO 배지 */}
+        <span className="hidden lg:inline-block px-4 py-1 rounded-[99px] bg-[#ADD8E6]/30 text-[#2563EB] text-[12px] font-bold">
           PRO
         </span>
 
-        {/* 플랜 업그레이드 버튼 */}
+        {/* PC 전용: 플랜 업그레이드 버튼 */}
         <Link
           href="/mypage"
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#F05705] hover:bg-[#D04A04] text-white text-[13px] font-semibold transition-colors"
+          className="hidden lg:flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#F05705] hover:bg-[#D04A04] text-white text-[13px] font-semibold transition-colors"
         >
           <span>플랜 업그레이드</span>
           <Rocket className="w-4 h-4" />
