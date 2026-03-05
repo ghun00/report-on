@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import TopBar from "@/components/topbar";
 import MobileDrawer from "@/components/mobiledrawer";
+import PendingUploadsBanner from "@/components/pending-uploads-banner";
 import ReportRow from "@/components/ui/reportrow";
 import Toast from "@/components/ui/toast";
 import { useReportsFromDb } from "@/lib/supabase/fetch-reports";
@@ -66,6 +67,8 @@ export default function StoragePage() {
           {error && (
             <p className="mb-4 text-sm text-red-600">목록을 불러오지 못했어요.</p>
           )}
+
+          <PendingUploadsBanner />
 
           <div className="space-y-6">
             {isLoading ? (

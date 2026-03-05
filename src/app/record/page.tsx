@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import TossStyleAlert from "@/components/ui/tossalert";
-import Toast from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 import {
   createReportRow,
@@ -12,9 +11,11 @@ import {
   updateReportErrorMessage,
 } from "@/lib/supabase/reports";
 import { uploadRecordingBlob } from "@/lib/supabase/upload-recording";
-import { saveRecording } from "@/lib/local-recordings";
+import { saveLocalRecording, deleteRecording, loadRecording } from "@/lib/local-recordings";
 import { useNetworkStatus } from "@/lib/hooks/use-network-status";
-import { Pause, Play, WifiOff, Loader2 } from "lucide-react";
+import { useCurrentUser } from "@/lib/supabase/use-current-user";
+import { isKakaoInApp, isIOS } from "@/lib/inapp";
+import { Pause, Play, WifiOff, Loader2, ExternalLink } from "lucide-react";
 
 type RecordingState =
   | "recording"
@@ -140,6 +141,8 @@ function formatTime(seconds: number): string {
 export default function RecordPage() {
   const router = useRouter();
   const { isOnline } = useNetworkStatus();
+  const { user } = useCurrentUser();
+  const showInAppBanner = isKakaoInApp();
   
   const [state, setState] = useState<RecordingState>("recording");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -151,7 +154,6 @@ export default function RecordPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastReportId, setLastReportId] = useState<string | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
-  const [showSavedToast, setShowSavedToast] = useState(false);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -256,6 +258,16 @@ export default function RecordPage() {
     };
   }, [startRecording, stopTimer]);
 
+  // ─── 업로드 중 페이지 이탈 방지 (로컬 저장되지만 사용자 안내) ─────────────────
+  useEffect(() => {
+    if (state !== "processing") return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [state]);
+
   // ─── 취소 핸들러 ──────────────────────────────────────────────────────────
   const handleCancel = useCallback(() => {
     if (state === "processing" || state === "upload_failed") return;
@@ -309,6 +321,22 @@ export default function RecordPage() {
       }
       setLastReportId(reportId);
 
+      try {
+        await saveLocalRecording({
+          reportId,
+          blob,
+          mimeType: blob.type || "audio/webm",
+          durationSec: lastDurationSecRef.current,
+          title,
+          userId: user?.id,
+        });
+      } catch (err) {
+        console.error("[runSaveAndFinish] Local save failed:", err);
+        setErrorMessage("로컬 저장에 실패했습니다. 다시 시도해 주세요.");
+        setState("upload_failed");
+        return;
+      }
+
       const supabase = createClient();
       const uploadResult = await uploadRecordingBlob(
         supabase, 
@@ -328,9 +356,9 @@ export default function RecordPage() {
       
       const updateResult = await updateReportAfterUpload(reportId, uploadResult.path!);
       if (!updateResult.success) {
-        const errMsg = updateResult.error ?? "update failed";
+        const errMsg = `audio_path update failed: ${updateResult.error ?? "unknown"}`;
         await updateReportFailed(reportId, errMsg);
-        setErrorMessage(errMsg);
+        setErrorMessage(updateResult.error ?? "업로드 후 처리에 실패했습니다.");
         setState("upload_failed");
         return;
       }
@@ -350,8 +378,10 @@ export default function RecordPage() {
       } catch {
         await updateReportErrorMessage(reportId, "worker trigger failed");
       }
+
+      await deleteRecording(reportId);
     },
-    [elapsedSeconds]
+    [elapsedSeconds, user?.id]
   );
 
   const handleFinishConfirm = useCallback(() => {
@@ -389,8 +419,18 @@ export default function RecordPage() {
   }, [stopRecording, stopTimer, runSaveAndFinish]);
 
   // ─── 업로드 재시도 ─────────────────────────────────────────────────────
-  const handleRetrySave = useCallback(() => {
-    const blob = lastFailedBlobRef.current;
+  const handleRetrySave = useCallback(async () => {
+    let blob = lastFailedBlobRef.current;
+    const reportId = lastReportId;
+    
+    if (!blob && reportId) {
+      const local = await loadRecording(reportId);
+      if (local) {
+        blob = local.blob;
+        lastFailedBlobRef.current = blob;
+      }
+    }
+    
     if (!blob) {
       router.push("/home");
       return;
@@ -405,37 +445,10 @@ export default function RecordPage() {
     setErrorMessage(null);
     setState("processing");
     
-    (async () => {
-      await new Promise((r) => setTimeout(r, 300));
-      await runSaveAndFinish(blob, lastReportId ?? undefined);
-      setIsRetrying(false);
-    })();
+    await new Promise((r) => setTimeout(r, 300));
+    await runSaveAndFinish(blob, reportId ?? undefined);
+    setIsRetrying(false);
   }, [runSaveAndFinish, router, lastReportId, isOnline]);
-
-  // ─── 나중에 업로드 (IndexedDB 저장) ────────────────────────────────────
-  const handleSaveForLater = useCallback(async () => {
-    const blob = lastFailedBlobRef.current;
-    const reportId = lastReportId;
-    
-    if (!blob || !reportId) {
-      router.push("/home");
-      return;
-    }
-    
-    try {
-      await saveRecording(reportId, blob, {
-        durationSec: lastDurationSecRef.current,
-        title: "상담 보고서",
-      });
-      setShowSavedToast(true);
-      setTimeout(() => {
-        router.push("/home");
-      }, 2000);
-    } catch (err) {
-      console.error("[handleSaveForLater] Failed to save to IndexedDB:", err);
-      setErrorMessage("임시 저장에 실패했습니다. 다시 시도해주세요.");
-    }
-  }, [lastReportId, router]);
 
   // ─── 중앙 버튼 핸들러 ──────────────────────────────────────────────────────
   const handleCenterButton = useCallback(() => {
@@ -463,16 +476,40 @@ export default function RecordPage() {
 
   return (
     <div className="min-h-screen bg-[#0F0F0F] flex flex-col items-center justify-center relative w-full">
+      {/* 카카오 인앱브라우저 경고 배너 */}
+      {showInAppBanner && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-[#FFE812] text-[#191919] px-4 py-2.5 flex flex-col sm:flex-row items-center justify-center gap-2 text-[13px]">
+          <p className="text-center">
+            카카오 인앱브라우저에서는 긴 녹음/업로드가 불안정할 수 있어요.
+            <br className="sm:hidden" />
+            Chrome{isIOS() ? "/Safari" : ""}에서 열면 더 안정적이에요.
+          </p>
+          <a
+            href={typeof window !== "undefined" ? window.location.href : ""}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#191919] text-white text-[12px] font-semibold hover:bg-[#333] transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            외부 브라우저로 열기
+          </a>
+        </div>
+      )}
+      
       {/* 오프라인 배너 */}
       {!isOnline && (
-        <div className="absolute top-0 left-0 right-0 z-50 bg-[#EF4444] text-white text-center py-2 text-[14px] font-medium flex items-center justify-center gap-2">
+        <div className={`absolute left-0 right-0 z-50 bg-[#EF4444] text-white text-center py-2 text-[14px] font-medium flex items-center justify-center gap-2 ${showInAppBanner ? "top-14" : "top-0"}`}>
           <WifiOff className="w-4 h-4" />
           네트워크 연결이 불안정합니다
         </div>
       )}
       
       {/* 상단 취소/종료 버튼 (검정 배경 위) */}
-      <div className={`absolute ${!isOnline ? 'top-10' : 'top-0'} left-0 right-0 z-40 flex items-center justify-between px-4 lg:px-8 py-4 lg:py-6`}>
+      <div
+        className={`absolute left-0 right-0 z-40 flex items-center justify-between px-4 lg:px-8 py-4 lg:py-6 ${
+          showInAppBanner && !isOnline ? "top-24" : showInAppBanner ? "top-14" : !isOnline ? "top-10" : "top-0"
+        }`}
+      >
         <button
           onClick={handleCancel}
           disabled={isDisabled}
@@ -509,7 +546,7 @@ export default function RecordPage() {
             </p>
             <p className="text-[15px] text-[#9395A6] mb-4 text-center max-w-[320px]">
               네트워크가 불안정하면 업로드가 끊길 수 있어요.
-              <br />다시 시도해 주세요.
+              <br />녹음은 기기에 저장돼 있어요. 홈에서 업로드를 재개할 수 있어요.
             </p>
             {errorMessage && (
               <p className="text-[13px] text-[#6B7280] mb-6 text-center max-w-[360px] bg-[#1A1A1A] px-4 py-2 rounded-lg font-mono break-all">
@@ -518,7 +555,7 @@ export default function RecordPage() {
             )}
             <div className="flex flex-col gap-3 w-full max-w-[320px]">
               <button
-                onClick={handleRetrySave}
+                onClick={() => handleRetrySave()}
                 disabled={isRetrying}
                 className="w-full rounded-xl bg-[#F05705] hover:bg-[#D04A04] disabled:bg-[#4A4A4A] py-3.5 text-[15px] font-semibold text-white transition-colors active:opacity-95 flex items-center justify-center gap-2"
               >
@@ -532,18 +569,11 @@ export default function RecordPage() {
                 )}
               </button>
               <button
-                onClick={handleSaveForLater}
-                disabled={isRetrying}
-                className="w-full rounded-xl bg-[#2A2A2A] hover:bg-[#3A3A3A] disabled:bg-[#1A1A1A] py-3.5 text-[15px] font-semibold text-white transition-colors active:opacity-95"
-              >
-                나중에 업로드
-              </button>
-              <button
                 onClick={() => router.push("/home")}
                 disabled={isRetrying}
                 className="w-full rounded-xl bg-transparent hover:bg-[#1A1A1A] py-3 text-[14px] font-medium text-[#9395A6] transition-colors"
               >
-                홈으로 가기 (녹음 삭제)
+                홈으로 가기
               </button>
             </div>
           </div>
@@ -601,8 +631,11 @@ export default function RecordPage() {
               <p className="text-[15px] lg:text-[18px] text-[#E4E6F0] mb-1 text-center">
                 완료되면 알림톡으로 안내드릴게요!
               </p>
-              <p className="text-[13px] lg:text-[15px] text-[#9395A6] mb-8 text-center">
+              <p className="text-[13px] lg:text-[15px] text-[#9395A6] mb-2 text-center">
                 이 화면을 닫아도 생성은 계속 진행돼요.
+              </p>
+              <p className="text-[12px] text-[#6B7280] mb-8 text-center">
+                업로드 완료 전에는 페이지를 닫지 마세요. (녹음은 기기에 저장돼 있어요)
               </p>
               <button
                 onClick={() => router.push("/home")}
@@ -659,14 +692,6 @@ export default function RecordPage() {
           type="warning"
         />
       </div>
-      
-      {/* 임시 저장 완료 토스트 */}
-      <Toast
-        open={showSavedToast}
-        message="기기에 임시 저장했어요. 네트워크가 좋아지면 업로드를 재개할 수 있어요."
-        onClose={() => setShowSavedToast(false)}
-        autoHideMs={3000}
-      />
     </div>
   );
 }

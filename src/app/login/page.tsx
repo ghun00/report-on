@@ -132,7 +132,7 @@ export default function LoginPage() {
           )}
         </div>
       </div>
-      <footer className="w-full px-30 py-6 border-t border-white/30">
+      <footer className="w-full px-6 md:px-30 py-4 md:py-6 border-t border-white/30">
         <div className="text-white/70 text-sm space-y-1">
           <p>프라이데이랩 | 대표자 : 한지훈</p>
           <p>사업자등록번호 : 481-11-03110</p>

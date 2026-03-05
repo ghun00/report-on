@@ -3,7 +3,7 @@
 const DB_NAME = "report-on-recordings";
 const DB_VERSION = 1;
 const STORE_NAME = "recordings";
-const MAX_RECORDINGS = 3;
+const MAX_RECORDINGS = 5;
 
 export interface LocalRecording {
   reportId: string;
@@ -11,6 +11,17 @@ export interface LocalRecording {
   mimeType: string;
   durationSec: number;
   createdAt: number;
+  title?: string;
+  userId?: string;
+}
+
+export interface SaveLocalRecordingPayload {
+  reportId: string;
+  blob: Blob;
+  mimeType?: string;
+  durationSec: number;
+  createdAt?: number;
+  userId?: string;
   title?: string;
 }
 
@@ -37,10 +48,21 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+/** 로컬에 녹음 저장 (업로드 시도 전에 반드시 호출) */
+export async function saveLocalRecording(payload: SaveLocalRecordingPayload): Promise<void> {
+  return saveRecording(payload.reportId, payload.blob, {
+    durationSec: payload.durationSec,
+    title: payload.title,
+    userId: payload.userId,
+    mimeType: payload.mimeType,
+    createdAt: payload.createdAt,
+  });
+}
+
 export async function saveRecording(
   reportId: string,
   blob: Blob,
-  meta: { durationSec: number; title?: string }
+  meta: { durationSec: number; title?: string; userId?: string; mimeType?: string; createdAt?: number }
 ): Promise<void> {
   const db = await openDB();
 
@@ -60,10 +82,11 @@ export async function saveRecording(
     const record: LocalRecording = {
       reportId,
       blob,
-      mimeType: blob.type || "audio/webm",
+      mimeType: (meta.mimeType ?? blob.type) || "audio/webm",
       durationSec: meta.durationSec,
-      createdAt: Date.now(),
+      createdAt: meta.createdAt ?? Date.now(),
       title: meta.title,
+      userId: meta.userId,
     };
 
     const request = store.put(record);
@@ -159,4 +182,11 @@ export async function countRecordings(): Promise<number> {
 
     tx.oncomplete = () => db.close();
   });
+}
+
+/** userId로 필터링 가능 (선택) */
+export async function listLocalRecordings(userId?: string): Promise<LocalRecording[]> {
+  const all = await listRecordings();
+  if (!userId) return all;
+  return all.filter((r) => r.userId === userId);
 }

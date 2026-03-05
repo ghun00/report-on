@@ -134,7 +134,7 @@ export default function PendingUploadsBanner() {
         <div className="flex items-center gap-2">
           <Upload className="w-5 h-5 text-[#F05705]" />
           <span className="text-[15px] font-semibold text-[#353644]">
-            임시 저장된 녹음 {recordings.length}개
+            업로드되지 않은 녹음 {recordings.length}건이 있어요
           </span>
         </div>
       </div>
@@ -177,7 +177,7 @@ export default function PendingUploadsBanner() {
                     업로드 중
                   </>
                 ) : (
-                  "업로드"
+                  "업로드 재개"
                 )}
               </button>
               <button
