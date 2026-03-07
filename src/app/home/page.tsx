@@ -89,8 +89,7 @@ export default function HomePage() {
   };
 
   const handleUploadFile = () => {
-    // TODO: 파일 업로드 로직
-    console.log("파일 업로드");
+    setToastMessage("현재 개발중인 기능이에요");
   };
 
   const handleTestReportCreate = async () => {
