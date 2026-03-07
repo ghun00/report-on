@@ -13,6 +13,14 @@ function getExtension(contentType: string): string {
   return ".webm";
 }
 
+console.log("[presign] env present:", {
+  hasAccess: !!process.env.NCP_ACCESS_KEY,
+  hasSecret: !!process.env.NCP_SECRET_KEY,
+  endpoint: !!process.env.NCP_S3_ENDPOINT,
+  bucket: !!process.env.NCP_RAW_BUCKET,
+  region: !!process.env.NCP_REGION,
+});
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();

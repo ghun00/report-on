@@ -1,7 +1,7 @@
 "use client";
 
 /** 30MB 이상이면 NCP 업로드 경로 사용 (Supabase 413 방지) */
-export const MAX_SUPABASE_UPLOAD_BYTES = 30 * 1024 * 1024;
+export const MAX_SUPABASE_UPLOAD_BYTES = 1 * 1024 * 1024;
 
 export function shouldUseNcpUpload(blobSize: number): boolean {
   return blobSize >= MAX_SUPABASE_UPLOAD_BYTES;
