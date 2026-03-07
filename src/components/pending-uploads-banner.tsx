@@ -6,7 +6,13 @@ import { Upload, X, Loader2 } from "lucide-react";
 import { listRecordings, loadRecording, deleteRecording, type LocalRecording } from "@/lib/local-recordings";
 import { createClient } from "@/lib/supabase/client";
 import { uploadRecordingBlobOnce } from "@/lib/supabase/upload-recording";
-import { updateReportAfterUpload, updateReportFailed, updateReportErrorMessage } from "@/lib/supabase/reports";
+import {
+  updateReportAfterUpload,
+  updateReportAfterNcpUpload,
+  updateReportFailed,
+  updateReportErrorMessage,
+} from "@/lib/supabase/reports";
+import { shouldUseNcpUpload, uploadToNcp } from "@/lib/ncp-upload";
 import { useNetworkStatus } from "@/lib/hooks/use-network-status";
 
 function formatDuration(seconds: number): string {
@@ -64,30 +70,55 @@ export default function PendingUploadsBanner() {
         return;
       }
 
-      const supabase = createClient();
-      const uploadResult = await uploadRecordingBlobOnce(
-        supabase,
-        reportId,
-        recording.blob,
-        recording.durationSec
-      );
+      const contentType = recording.mimeType || "audio/webm";
+      const useNcp = shouldUseNcpUpload(recording.blob.size);
 
-      if (!uploadResult.success) {
-        const errMsg = `upload failed: ${uploadResult.error ?? "unknown error"}`;
-        await updateReportFailed(reportId, errMsg);
-        setError(uploadResult.error ?? "업로드에 실패했습니다.");
-        setIsUploading(false);
-        setUploadingId(null);
-        return;
-      }
-
-      const updateResult = await updateReportAfterUpload(reportId, uploadResult.path!);
-      if (!updateResult.success) {
-        await updateReportFailed(reportId, updateResult.error ?? "update failed");
-        setError(updateResult.error ?? "업데이트에 실패했습니다.");
-        setIsUploading(false);
-        setUploadingId(null);
-        return;
+      if (useNcp) {
+        const ncpResult = await uploadToNcp(reportId, recording.blob, contentType);
+        if (!ncpResult.success) {
+          await updateReportFailed(reportId, ncpResult.error ?? "NCP upload failed");
+          setError(ncpResult.error ?? "업로드에 실패했습니다.");
+          setIsUploading(false);
+          setUploadingId(null);
+          return;
+        }
+        const updateResult = await updateReportAfterNcpUpload(
+          reportId,
+          ncpResult.objectKey!,
+          recording.blob.size,
+          contentType
+        );
+        if (!updateResult.success) {
+          await updateReportFailed(reportId, updateResult.error ?? "update failed");
+          setError(updateResult.error ?? "업데이트에 실패했습니다.");
+          setIsUploading(false);
+          setUploadingId(null);
+          return;
+        }
+      } else {
+        const supabase = createClient();
+        const uploadResult = await uploadRecordingBlobOnce(
+          supabase,
+          reportId,
+          recording.blob,
+          recording.durationSec
+        );
+        if (!uploadResult.success) {
+          const errMsg = `upload failed: ${uploadResult.error ?? "unknown error"}`;
+          await updateReportFailed(reportId, errMsg);
+          setError(uploadResult.error ?? "업로드에 실패했습니다.");
+          setIsUploading(false);
+          setUploadingId(null);
+          return;
+        }
+        const updateResult = await updateReportAfterUpload(reportId, uploadResult.path!);
+        if (!updateResult.success) {
+          await updateReportFailed(reportId, updateResult.error ?? "update failed");
+          setError(updateResult.error ?? "업데이트에 실패했습니다.");
+          setIsUploading(false);
+          setUploadingId(null);
+          return;
+        }
       }
 
       try {

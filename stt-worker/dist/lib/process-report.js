@@ -10,6 +10,7 @@ const os_1 = __importDefault(require("os"));
 const path_1 = __importDefault(require("path"));
 const util_1 = require("util");
 const supabase_1 = require("./supabase");
+const ncp_raw_client_1 = require("./ncp-raw-client");
 const ncp_storage_1 = require("./ncp-storage");
 const clova_long_1 = require("./clova-long");
 const report_generator_1 = require("./report-generator");
@@ -36,7 +37,7 @@ async function processReport(reportId) {
     try {
         const { data: row, error: fetchError } = await supabase_1.supabase
             .from("reports")
-            .select("id, audio_path, status")
+            .select("id, audio_path, audio_provider, status")
             .eq("id", reportId)
             .single();
         if (fetchError || !row) {
@@ -45,18 +46,40 @@ async function processReport(reportId) {
             await updateReportFailed(reportId, `report fetch: ${msg}`);
             return;
         }
-        const storagePath = row.audio_path || getAudioStoragePath(reportId);
-        const { data: fileData, error: downloadError } = await supabase_1.supabase.storage
-            .from(supabase_1.STORAGE_BUCKET)
-            .download(storagePath);
-        if (downloadError || !fileData) {
-            const msg = downloadError?.message ?? "Download failed";
-            console.error("[processReport]", reportId, "download error:", msg);
-            await updateReportFailed(reportId, `storage download: ${msg}`);
-            return;
+        const audioProvider = row.audio_provider || "supabase";
+        let rawBuffer;
+        if (audioProvider === "ncp") {
+            const objectKey = row.audio_path?.trim();
+            if (!objectKey) {
+                await updateReportFailed(reportId, "NCP audio_path is empty");
+                return;
+            }
+            try {
+                rawBuffer = await (0, ncp_raw_client_1.downloadFromNcpRaw)(objectKey);
+            }
+            catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                console.error("[processReport]", reportId, "NCP download error:", msg);
+                await updateReportFailed(reportId, `ncp raw download: ${msg}`);
+                return;
+            }
+            console.log("[processReport]", reportId, "NCP download ok", objectKey);
         }
-        console.log("[processReport]", reportId, "download ok");
-        await promises_1.default.writeFile(rawPath, Buffer.from(await fileData.arrayBuffer()));
+        else {
+            const storagePath = row.audio_path || getAudioStoragePath(reportId);
+            const { data: fileData, error: downloadError } = await supabase_1.supabase.storage
+                .from(supabase_1.STORAGE_BUCKET)
+                .download(storagePath);
+            if (downloadError || !fileData) {
+                const msg = downloadError?.message ?? "Download failed";
+                console.error("[processReport]", reportId, "download error:", msg);
+                await updateReportFailed(reportId, `storage download: ${msg}`);
+                return;
+            }
+            console.log("[processReport]", reportId, "download ok");
+            rawBuffer = Buffer.from(await fileData.arrayBuffer());
+        }
+        await promises_1.default.writeFile(rawPath, rawBuffer);
         await convertToWav(rawPath, wavPath);
         console.log("[processReport]", reportId, "ffmpeg ok");
         const wavBuffer = await promises_1.default.readFile(wavPath);

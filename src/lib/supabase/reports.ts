@@ -46,7 +46,7 @@ export async function createReportRow(
   return { success: true, id: data?.id };
 }
 
-/** 업로드 완료 후 reports 업데이트: audio_path, status='generating' */
+/** 업로드 완료 후 reports 업데이트: audio_path, status='generating' (Supabase용) */
 export async function updateReportAfterUpload(
   reportId: string,
   audioPath: string
@@ -54,12 +54,44 @@ export async function updateReportAfterUpload(
   const supabase = await createClient();
   const { error } = await supabase
     .from("reports")
-    .update({ audio_path: audioPath, status: "generating" })
+    .update({
+      audio_path: audioPath,
+      audio_provider: "supabase",
+      status: "generating",
+    })
     .eq("id", reportId);
 
   if (error) {
     if (process.env.NODE_ENV === "development") {
       console.error("[updateReportAfterUpload]", error);
+    }
+    return { success: false, error: error.message };
+  }
+  return { success: true };
+}
+
+/** NCP presigned PUT 업로드 완료 후 reports 업데이트 */
+export async function updateReportAfterNcpUpload(
+  reportId: string,
+  objectKey: string,
+  audioSizeBytes: number,
+  audioMime: string
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("reports")
+    .update({
+      audio_provider: "ncp",
+      audio_path: objectKey,
+      audio_size_bytes: audioSizeBytes,
+      audio_mime: audioMime,
+      status: "generating",
+    })
+    .eq("id", reportId);
+
+  if (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[updateReportAfterNcpUpload]", error);
     }
     return { success: false, error: error.message };
   }
