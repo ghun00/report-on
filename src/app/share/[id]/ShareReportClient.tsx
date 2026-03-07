@@ -39,7 +39,7 @@ export default function ShareReportClient({ reportId }: ShareReportClientProps) 
     setIsLoading(true);
     setLoadError(null);
 
-    fetch(`/api/public-report/${reportId}`)
+    fetch(`/api/public-report/${reportId}`, { cache: "no-store" })
       .then(async (res) => {
         if (!res.ok) {
           const errBody = await res.json().catch(() => ({}));
