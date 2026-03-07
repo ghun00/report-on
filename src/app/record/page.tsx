@@ -661,9 +661,6 @@ export default function RecordPage() {
               <p className="text-[13px] lg:text-[15px] text-[#9395A6] mb-2 text-center">
                 이 화면을 닫아도 생성은 계속 진행돼요.
               </p>
-              <p className="text-[12px] text-[#6B7280] mb-8 text-center">
-                업로드 완료 전에는 페이지를 닫지 마세요. (녹음은 기기에 저장돼 있어요)
-              </p>
               <button
                 onClick={() => router.push("/home")}
                 className="w-full rounded-xl bg-[#F05705] hover:bg-[#D04A04] py-3.5 text-[15px] font-semibold text-white transition-colors active:opacity-95"
