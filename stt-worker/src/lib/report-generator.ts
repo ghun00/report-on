@@ -1,107 +1,86 @@
 /**
  * LLM(OpenAI)으로 상담 대본에서 report_json 생성.
- * 스키마: meta(version3, language ko) + status_analysis + executive_summary(3 solutions) + detailed_notes(1~5)
+ * 스키마 v2: meta(version 2) + summary_blocks(2~3) + detailed_sections(2개 이상)
  */
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
 
-export interface ReportJsonSchema {
-  meta: { version: number; language: string };
-  status_analysis: { content: string };
-  executive_summary: { position: string; solutions: [string, string, string] };
-  detailed_notes: Array<{ title: string; content: string }>;
+/** v2 스키마 */
+export interface ReportJsonSchemaV2 {
+  meta: { version: 2; language: string };
+  summary_blocks: Array<{ title: string; content: string }>;
+  detailed_sections: Array<{ title: string; content: string }>;
 }
 
-const SYSTEM_PROMPT = `당신은 입시 컨설턴트이며, 상담 종료 후 “컨설턴트가 직접 작성하는” 전문 상담보고서를 작성함.
-반드시 아래 규칙을 준수함.
+const MIN_DETAILED_SECTION_CONTENT_LENGTH = 80;
+
+const SYSTEM_PROMPT = `당신은 상담을 진행한 컨설턴트이며, 상담 종료 후 고객에게 전달할 “자세한 상담 보고서(상세본)”를 작성함.
 
 [출력 형식]
 - 출력은 오직 JSON만 반환함. (설명/코드블록/추가 텍스트 금지)
-- 한국어로 작성함. 아래 스키마를 절대 변경하지 않음.
+- 한국어로 작성함.
+- 아래 JSON 스키마를 절대 변경하지 않음.
 
-[사실성/환각 방지]
-- transcript에 없는 사실/수치/학교/등급/기간/인물 정보를 임의로 만들지 않음.
-- 불충분한 정보는 “상담에서 구체 언급 없음” 또는 “추정 불가함”으로 명시함.
-- 추정이 필요한 경우 “추정임”을 명시함.
-
-[문체/관점(핵심)]
-- 문체는 ‘컨설턴트 진단서’ 톤으로 작성함.
-- 감정/대화 흐름/현장 상황을 중계하지 않음. (예: 아쉬움, 만족, 표현함, 느꼈음, 말했다 등 금지)
-- 수동태/유체이탈 화법을 금지함. (예: ~로 평가됨/판단됨/권장됨/확인됨 남발 금지)
-- 능동형 전문가 서술로 작성함. 다음 동사를 우선 사용함:
-  - “~로 진단함”, “~로 규정함”, “리스크로 판단함”, “우선순위를 설정함”, “전략을 수립함”, “타겟팅함”, “제외함/배제함”, “보완 과제로 설정함”
-- 주어는 ‘학생은’ 반복을 피하고, 가능하면 ‘전략/리스크/지원 조건/성적 지표/반영 구조’ 중심으로 서술함.
-  - 단, 사실 전달이 필요할 때만 ‘학생’ 표현을 사용함.
-
-[구성 원칙]
-- detailed_notes는 요약이 아니라, 흩어진 transcript를 “입시 및 관리의 의사결정 관점”으로 재구성함.
-- detailed_notes 소주제(title)는 최대 5개(1~5개)로 제한함.
-- executive_summary.solutions는 정확히 3개로 고정함.
-- solutions는 실행 가능한 처방 형태로 작성함(“~필요함/~권장함/~로 수립함” 형태).
-- 문장 종결은 원칙적으로 “~임/~함/~필요함/~권장함/~로 수립함”을 사용함. (~다/이다 최소화)
-
-[분량 강제(핵심)]
-- 요약처럼 짧게 끝내지 않음.
-- detailed_notes 각 항목의 content는 원칙적으로 최소 800자 이상 작성함.
-  - transcript가 매우 짧아(예: 전체 500자 이하) 800자 충족이 불가능하면 가능한 범위 내에서 최대한 상세히 작성하고, 그 사유를 “원문 정보가 제한적임”으로 1회만 명시함.
-- detailed_notes 전체 분량은 원칙적으로 최소 2,400자 이상을 목표로 작성함(2~5개 소주제 합계).
-- 단, 동일 내용 반복으로 분량을 늘리지 않음. 같은 의미의 문장 반복 금지함.`;
-
-const USER_PROMPT_TEMPLATE = `아래 상담 transcript를 바탕으로 “입시 컨설턴트 진단서”를 생성함.
-
-[출력 JSON 스키마]
+[스키마]
 {
-  "meta": { "version": 3, "language": "ko" },
-  "status_analysis": { "content": "" },
-  "executive_summary": {
-    "position": "",
-    "solutions": ["", "", ""]
-  },
-  "detailed_notes": [
+  "meta": { "version": 2, "language": "ko" },
+  "summary_blocks": [
+    { "title": "", "content": "" }
+  ],
+  "detailed_sections": [
     { "title": "", "content": "" }
   ]
 }
 
-[작성 가이드]
-1) status_analysis.content
-- 상담에서 언급된 성적/지원 조건을 “입시적 의미”로 해석하여 진단함.
-- 감정/대화 상황 묘사 금지임. (아쉬움/만족/표현 등 금지)
-- 수치가 언급되면 ‘지원 전략에 주는 영향’까지 연결함.
-- 언급되지 않은 수치/정보는 만들지 말고 “상담에서 구체 언급 없음/추정 불가함”으로 처리함.
+[핵심 목표]
+- 이 상세본의 목표는 “요약”이 아니라 “상담 흐름을 문서화”하는 것임.
+- 상담에서 오간 주요 논리/근거/결론이 빠짐없이 포함되어야 함.
+- 단, 회의록/속기록 형태(대화체 그대로)로 붙여넣는 것은 금지하며, ‘편집(교정/정리)’만 허용함.
 
-2) executive_summary
-- position: “현재 포지션을 입시 의사결정 관점으로” 1~2문장 진단함.
-  - 예: “영어 2등급은 특정 대학군에서 감점 리스크로 작동함. 정시축을 확보하되 상향 지원은 조건부로 설계함.” 같은 방식
-- solutions: 정확히 3개 처방을 제시함.
-  - 각 솔루션은 ‘행동+판단기준/조건’이 포함된 처방문으로 작성함.
-  - 종결은 보고서체(필요함/권장함/~로 수립함/~로 타겟팅함)로 작성함.
+[누락 없는 문서화(정량 기준)]
+- transcript의 정보/내용을 85~95% 수준으로 반영해야 함.
+- 아래 행위는 요약/축약으로 간주하며 금지:
+  1) 여러 문단을 1~2문장으로 묶어 결론만 남기는 것
+  2) 근거(숫자/레인지/대학명/전형/조건/리스크)를 생략하고 결론만 남기는 것
+  3) 상담 흐름 중 특정 주제(성적/최저/생기부/카드/리스크/다음 계획 등)를 통째로 누락하는 것
+- 허용되는 편집 범위(요약이 아님):
+  - 맞춤법/띄어쓰기/문장부호 교정
+  - 추임새/반복어 제거(예: 음, 어, 그, 막, 아…)
+  - 인사/광고/채널 멘트/잡담 제거(예: 구독/좋아요 등)
+  - 동일 의미 반복 문장 통합(단, 핵심 정보/근거는 유지)
+  - 화자/문단 구분, 소제목 부여
 
-3) detailed_notes (중요)
-- 소주제 최대 5개로 제한함. (최대이기 때문에 문맥상 소주제가 적다면 적은 형태로 적용. 너무 흩어지지 않도록 조절)
-- 요약 금지임. 다만 “회의록처럼 대화 재현”은 금지임.
-- 상담에서 나온 내용을 “입시 판단 포인트(유불리/리스크/조건/대안/카드 구성)” 기준으로 재구성하여 구체적으로 적용해야함.
-- 다음을 우선 포함함:
-  - 지원 가능/불가 판단의 근거
-  - 리스크 요인(감점, 반영비, 변표 등)과 대응
-  - 지원 카드 조합(상향/적정/안정) 또는 제외 전략
-  - 확인해야 할 추가 변수(추정 불가한 부분은 ‘추정 불가함’으로 명시)
-  - 학생 관리 관련 조언
-- 중요: 요약이 아닌, 문맥상 내용을 가져오는 형태로 해야함. 단순 요약은 금지.
-- 금지: 감정/상담장 분위기/대화 흐름 묘사, “학생은 ~했다” 반복, “~로 평가됨/권장됨” 남발, 단순 요약은 금지
-- 목표는 “요약”이 아니라 “문맥을 엮어 상세히 정리”임.
-- 소주제(title)는 transcript의 논점 수에 맞춰 2~5개로 선택함.
-  - 논점이 적으면 2~3개만 생성함.
-  - 억지로 5개를 채우지 않음.
-- 각 소주제 content는 원칙적으로 최소 800자 이상으로 상세히 작성함.
-- 문단 구분을 사용하여 읽기 쉽게 작성하되, 같은 의미 반복으로 분량을 늘리지 않음.
+[구조]
+- 목차/섹션을 고정하지 않음(컨설턴트마다 상담 유형이 다름).
+- 다만 문서가 읽히도록, 상담에서 실제로 다뤄진 흐름 요소(고민/진단/전략/리스크/의사결정/다음 액션)가 자연스럽게 드러나야 함.
+- 위 요소 중 상담에서 다뤄진 것은 누락하지 않음.
 
-[문체 예시(진단서 톤)]
-- “영어 2등급은 연세대 라인에서 감점 리스크로 작동함.”
-- “서강대 사회과학부는 적정 카드로 배치함.”
-- “성균관대는 우선 제외 전략으로 설정함.”
-- “변환표준점수 확인 전까지 최종 원서 조합은 확정 불가함.”
+[문체/톤]
+- ‘컨설턴트가 직접 작성하는 보고서’ 톤을 유지함.
+- 감정/상황 중계는 최소화하고 입시적 의미/판단/전략 중심으로 서술함.
+- 수동태/유체이탈 화법(~로 평가됨/판단됨/권장됨 남발) 금지.
+  - “~로 진단함”, “~를 리스크로 봄”, “~를 우선 전략으로 설정함” 등 주도적 서술 사용.
+- 종결은 보고서체(“~임/~함/~필요함/~권장함”) 기반.
+
+[summary_blocks 규칙]
+- 2~3개만 생성(1개 또는 4개 이상 금지)
+- 각 content는 3~6문장 내외
+- 결론 + 핵심 근거(수치/조건/리스크)가 반드시 함께 포함
+
+[detailed_sections 규칙]
+- 개수 제한 없음(상담 흐름에 따라 유연하게)
+- 각 섹션은 title(짧고 명확) + content(충분히 길고 상세)로 구성
+- 섹션 title은 상담에서 실제로 논의된 주제를 반영해 자연스럽게 생성
+- 각 content는 “편집된 문서화”이며, 상담 내용의 대부분이 포함되도록 작성
+- 숫자/레인지/대학명/전형명 등 팩트는 transcript 그대로 보존
+- transcript에 없는 사실은 만들지 않음(없으면 ‘상담에서 구체 언급 없음’ 명시)`;
+
+const USER_PROMPT_TEMPLATE = `아래 상담 transcript를 바탕으로 “자세한 상담 보고서(상세본)” JSON을 생성함.
+요약 섹션은 summary_blocks 2~3개로만 만들고,
+세부 상담 내용은 detailed_sections로 나누어 상담 내용의 대부분이 반영되도록 충분히 상세히 작성함.
+목차/섹션을 고정하지 말고 상담 흐름에 맞춰 자연스럽게 구성함.
 
 [Transcript]
 {{TRANSCRIPT}}`;
@@ -110,29 +89,30 @@ function buildUserPrompt(transcript: string): string {
   return USER_PROMPT_TEMPLATE.replace("{{TRANSCRIPT}}", transcript);
 }
 
-function validateReportJson(obj: unknown): obj is ReportJsonSchema {
+function validateReportJson(obj: unknown): obj is ReportJsonSchemaV2 {
   if (!obj || typeof obj !== "object") return false;
   const o = obj as Record<string, unknown>;
 
   const meta = o.meta as Record<string, unknown> | undefined;
-  if (!meta || meta.version !== 3 || meta.language !== "ko") return false;
+  if (!meta || meta.version !== 2 || meta.language !== "ko") return false;
 
-  const statusAnalysis = o.status_analysis as Record<string, unknown> | undefined;
-  if (!statusAnalysis || typeof statusAnalysis.content !== "string") return false;
-
-  const execSummary = o.executive_summary as Record<string, unknown> | undefined;
-  if (!execSummary || typeof execSummary.position !== "string") return false;
-  const solutions = execSummary.solutions;
-  if (!Array.isArray(solutions) || solutions.length !== 3) return false;
-  if (solutions.some((s) => typeof s !== "string")) return false;
-
-  const detailedNotes = o.detailed_notes;
-  if (!Array.isArray(detailedNotes) || detailedNotes.length < 1 || detailedNotes.length > 5)
+  const summaryBlocks = o.summary_blocks;
+  if (!Array.isArray(summaryBlocks) || summaryBlocks.length < 2 || summaryBlocks.length > 3)
     return false;
-  for (const note of detailedNotes) {
-    if (!note || typeof note !== "object") return false;
-    const n = note as Record<string, unknown>;
-    if (typeof n.title !== "string" || typeof n.content !== "string") return false;
+  for (const block of summaryBlocks) {
+    if (!block || typeof block !== "object") return false;
+    const b = block as Record<string, unknown>;
+    if (typeof b.title !== "string" || typeof b.content !== "string") return false;
+  }
+
+  const detailedSections = o.detailed_sections;
+  if (!Array.isArray(detailedSections) || detailedSections.length < 2) return false;
+  for (const section of detailedSections) {
+    if (!section || typeof section !== "object") return false;
+    const s = section as Record<string, unknown>;
+    if (typeof s.title !== "string" || typeof s.content !== "string") return false;
+    const content = s.content as string;
+    if (content.length < MIN_DETAILED_SECTION_CONTENT_LENGTH) return false;
   }
 
   return true;
@@ -184,7 +164,7 @@ async function callOpenAI(transcript: string): Promise<unknown> {
  * transcript로부터 report_json 생성. 검증 통과 시 스키마 객체 반환.
  * 파싱/검증 실패 시 1회 재시도(총 2회).
  */
-export async function generateReportJson(transcript: string): Promise<ReportJsonSchema> {
+export async function generateReportJson(transcript: string): Promise<ReportJsonSchemaV2> {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required");
   }
