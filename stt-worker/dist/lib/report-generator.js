@@ -12,6 +12,7 @@ const MIN_DETAILED_SECTION_CONTENT_LENGTH = 80;
 const MIN_COVERAGE_RATIO = 0.85;
 const MIN_DETAILED_TEXT_LENGTH = 1200;
 const MAX_ATTEMPTS = 3;
+const ALLOWED_META_VERSIONS = new Set([2, 4]);
 const RETRY_USER_PROMPT_SUFFIX = "이전 결과가 원문 대비 지나치게 짧았습니다. 원문 길이의 85% 이상을 유지하도록 편집 중심으로 다시 작성하세요. 요약/축약은 금지입니다.";
 const SYSTEM_PROMPT = `당신은 상담을 진행한 컨설턴트이며, 상담 종료 후 고객에게 전달할 “자세한 상담 보고서(상세본)”를 작성함.
 이 작업은 요약이 아니라 ‘편집(Editing)’이다. transcript의 내용을 최대한 그대로 유지하면서 읽기 좋게 다듬는 것이 목적이다.
@@ -108,7 +109,8 @@ function validateReportJson(obj) {
         return false;
     const o = obj;
     const meta = o.meta;
-    if (!meta || meta.version !== 2 || meta.language !== "ko")
+    const version = typeof meta?.version === "number" ? meta.version : null;
+    if (!meta || version === null || !ALLOWED_META_VERSIONS.has(version) || meta.language !== "ko")
         return false;
     const summaryBlocks = o.summary_blocks;
     if (!Array.isArray(summaryBlocks) || summaryBlocks.length < 2 || summaryBlocks.length > 3)
@@ -221,25 +223,100 @@ async function callOpenAI(transcript, extraUserInstruction = "") {
     const finalUserPrompt = extraUserInstruction
         ? `${userPrompt}\n\n${extraUserInstruction}`
         : userPrompt;
+    const responseJsonSchema = {
+        name: "report_json_schema",
+        strict: true,
+        schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                meta: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        version: { type: "number", enum: [2, 4] },
+                        language: { type: "string", enum: ["ko"] },
+                    },
+                    required: ["version", "language"],
+                },
+                summary_blocks: {
+                    type: "array",
+                    minItems: 2,
+                    maxItems: 3,
+                    items: {
+                        type: "object",
+                        additionalProperties: false,
+                        properties: {
+                            title: { type: "string" },
+                            content: { type: "string" },
+                        },
+                        required: ["title", "content"],
+                    },
+                },
+                detailed_sections: {
+                    type: "array",
+                    minItems: 2,
+                    items: {
+                        type: "object",
+                        additionalProperties: false,
+                        properties: {
+                            title: { type: "string" },
+                            content: { type: "string" },
+                        },
+                        required: ["title", "content"],
+                    },
+                },
+            },
+            required: ["meta", "summary_blocks", "detailed_sections"],
+        },
+    };
     const url = `${OPENAI_BASE_URL.replace(/\/$/, "")}/chat/completions`;
-    const res = await fetch(url, {
+    const requestBody = {
+        model: OPENAI_MODEL,
+        messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: finalUserPrompt },
+        ],
+        response_format: { type: "json_schema", json_schema: responseJsonSchema },
+        temperature: 0.3,
+    };
+    let res = await fetch(url, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${OPENAI_API_KEY}`,
         },
-        body: JSON.stringify({
-            model: OPENAI_MODEL,
-            messages: [
-                { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: finalUserPrompt },
-            ],
-            response_format: { type: "json_object" },
-            temperature: 0.3,
-        }),
+        body: JSON.stringify(requestBody),
     });
+    let nonOkBody = null;
     if (!res.ok) {
-        const text = await res.text();
+        let text = await res.text();
+        nonOkBody = text;
+        if (res.status === 400 &&
+            /json_schema|response_format|schema/i.test(text)) {
+            console.warn("[report-generator] json_schema response_format rejected, fallback to json_object");
+            res = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${OPENAI_API_KEY}`,
+                },
+                body: JSON.stringify({
+                    ...requestBody,
+                    response_format: { type: "json_object" },
+                }),
+            });
+            if (res.ok) {
+                nonOkBody = null;
+            }
+            else {
+                text = await res.text();
+                nonOkBody = text;
+            }
+        }
+    }
+    if (!res.ok) {
+        const text = nonOkBody ?? "";
         const errSnippet = text.slice(0, 500);
         console.error("[report-generator] OpenAI API error:", "status=", res.status, "body=", errSnippet);
         throw new Error(`OpenAI API ${res.status}: ${errSnippet}`);
@@ -274,6 +351,7 @@ async function generateReportJson(transcript) {
         const extraInstruction = attempt > 1 ? RETRY_USER_PROMPT_SUFFIX : "";
         try {
             const parsed = await callOpenAI(transcript, extraInstruction);
+            console.log("[report-generator] parsed preview:", JSON.stringify(parsed).slice(0, 800));
             if (!validateReportJson(parsed)) {
                 lastError = new Error("schema validation failed");
                 console.warn("[report-generator] attempt validation failed:", "attempt=", attempt, "reason=schema validation failed");
