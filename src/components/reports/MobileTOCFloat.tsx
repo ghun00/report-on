@@ -5,12 +5,22 @@ import { List, X } from "lucide-react";
 import { TOC_SECTIONS } from "./report-json-types";
 import { cn } from "@/lib/utils";
 
+interface TocSection {
+  id: string;
+  label: string;
+}
+
 interface MobileTOCFloatProps {
   activeId: string | null;
   onNav: (id: string) => void;
+  sections?: readonly TocSection[];
 }
 
-export default function MobileTOCFloat({ activeId, onNav }: MobileTOCFloatProps) {
+export default function MobileTOCFloat({
+  activeId,
+  onNav,
+  sections = TOC_SECTIONS,
+}: MobileTOCFloatProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const handleItemClick = (id: string) => {
@@ -48,7 +58,7 @@ export default function MobileTOCFloat({ activeId, onNav }: MobileTOCFloatProps)
 
             {/* 목차 항목 */}
             <nav className="py-2">
-              {TOC_SECTIONS.map((s) => {
+              {sections.map((s) => {
                 const isActive = activeId === s.id;
                 return (
                   <button

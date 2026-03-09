@@ -1,100 +1,102 @@
 "use strict";
 /**
  * LLM(OpenAI)으로 상담 대본에서 report_json 생성.
- * 스키마: meta(version3, language ko) + status_analysis + executive_summary(3 solutions) + detailed_notes(1~5)
+ * 스키마 v2: meta(version 2) + summary_blocks(2~3) + detailed_sections(2개 이상)
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateReportJson = generateReportJson;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o-mini";
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
-const SYSTEM_PROMPT = `당신은 입시 컨설턴트이며, 상담 종료 후 “컨설턴트가 직접 작성하는” 전문 상담보고서를 작성함.
-반드시 아래 규칙을 준수함.
+const MIN_DETAILED_SECTION_CONTENT_LENGTH = 80;
+const MIN_COVERAGE_RATIO = 0.85;
+const MIN_DETAILED_TEXT_LENGTH = 1200;
+const MAX_ATTEMPTS = 3;
+const RETRY_USER_PROMPT_SUFFIX = "이전 결과가 원문 대비 지나치게 짧았습니다. 원문 길이의 85% 이상을 유지하도록 편집 중심으로 다시 작성하세요. 요약/축약은 금지입니다.";
+const SYSTEM_PROMPT = `당신은 상담을 진행한 컨설턴트이며, 상담 종료 후 고객에게 전달할 “자세한 상담 보고서(상세본)”를 작성함.
+이 작업은 요약이 아니라 ‘편집(Editing)’이다. transcript의 내용을 최대한 그대로 유지하면서 읽기 좋게 다듬는 것이 목적이다.
 
 [출력 형식]
 - 출력은 오직 JSON만 반환함. (설명/코드블록/추가 텍스트 금지)
-- 한국어로 작성함. 아래 스키마를 절대 변경하지 않음.
+- 한국어로 작성함.
+- 아래 JSON 스키마를 절대 변경하지 않음.
 
-[사실성/환각 방지]
-- transcript에 없는 사실/수치/학교/등급/기간/인물 정보를 임의로 만들지 않음.
-- 불충분한 정보는 “상담에서 구체 언급 없음” 또는 “추정 불가함”으로 명시함.
-- 추정이 필요한 경우 “추정임”을 명시함.
-
-[문체/관점(핵심)]
-- 문체는 ‘컨설턴트 진단서’ 톤으로 작성함.
-- 감정/대화 흐름/현장 상황을 중계하지 않음. (예: 아쉬움, 만족, 표현함, 느꼈음, 말했다 등 금지)
-- 수동태/유체이탈 화법을 금지함. (예: ~로 평가됨/판단됨/권장됨/확인됨 남발 금지)
-- 능동형 전문가 서술로 작성함. 다음 동사를 우선 사용함:
-  - “~로 진단함”, “~로 규정함”, “리스크로 판단함”, “우선순위를 설정함”, “전략을 수립함”, “타겟팅함”, “제외함/배제함”, “보완 과제로 설정함”
-- 주어는 ‘학생은’ 반복을 피하고, 가능하면 ‘전략/리스크/지원 조건/성적 지표/반영 구조’ 중심으로 서술함.
-  - 단, 사실 전달이 필요할 때만 ‘학생’ 표현을 사용함.
-
-[구성 원칙]
-- detailed_notes는 요약이 아니라, 흩어진 transcript를 “입시 및 관리의 의사결정 관점”으로 재구성함.
-- detailed_notes 소주제(title)는 최대 5개(1~5개)로 제한함.
-- executive_summary.solutions는 정확히 3개로 고정함.
-- solutions는 실행 가능한 처방 형태로 작성함(“~필요함/~권장함/~로 수립함” 형태).
-- 문장 종결은 원칙적으로 “~임/~함/~필요함/~권장함/~로 수립함”을 사용함. (~다/이다 최소화)
-
-[분량 강제(핵심)]
-- 요약처럼 짧게 끝내지 않음.
-- detailed_notes 각 항목의 content는 원칙적으로 최소 800자 이상 작성함.
-  - transcript가 매우 짧아(예: 전체 500자 이하) 800자 충족이 불가능하면 가능한 범위 내에서 최대한 상세히 작성하고, 그 사유를 “원문 정보가 제한적임”으로 1회만 명시함.
-- detailed_notes 전체 분량은 원칙적으로 최소 2,400자 이상을 목표로 작성함(2~5개 소주제 합계).
-- 단, 동일 내용 반복으로 분량을 늘리지 않음. 같은 의미의 문장 반복 금지함.`;
-const USER_PROMPT_TEMPLATE = `아래 상담 transcript를 바탕으로 “입시 컨설턴트 진단서”를 생성함.
-
-[출력 JSON 스키마]
+[스키마]
 {
-  "meta": { "version": 3, "language": "ko" },
-  "status_analysis": { "content": "" },
-  "executive_summary": {
-    "position": "",
-    "solutions": ["", "", ""]
-  },
-  "detailed_notes": [
+  "meta": { "version": 4, "language": "ko" },
+  "summary_blocks": [
+    { "title": "", "content": "" }
+  ],
+  "detailed_sections": [
     { "title": "", "content": "" }
   ]
 }
 
-[작성 가이드]
-1) status_analysis.content
-- 상담에서 언급된 성적/지원 조건을 “입시적 의미”로 해석하여 진단함.
-- 감정/대화 상황 묘사 금지임. (아쉬움/만족/표현 등 금지)
-- 수치가 언급되면 ‘지원 전략에 주는 영향’까지 연결함.
-- 언급되지 않은 수치/정보는 만들지 말고 “상담에서 구체 언급 없음/추정 불가함”으로 처리함.
+────────────────────────────
+[절대 원칙: 편집만 / 요약·축약 금지]
+────────────────────────────
+- 당신은 정보를 ‘줄이거나 압축’하면 안 됨.
+- transcript의 내용(사실/질문/답변/근거/수치/대학명/전형/전략/조언/결론/리스크/계획)을 가능한 한 그대로 담아야 함.
+- 아래는 즉시 실패(금지):
+  1) 여러 문장·문단을 1~2문장으로 압축(요약)
+  2) 근거(수치/대학명/전형/조건/리스크)를 삭제하고 결론만 남김
+  3) 상담에서 실제로 다룬 논점/질문/의사결정 과정을 생략
+  4) “전반적으로/대체로/전체적으로” 같은 표현으로 세부를 대체
+  5) 원문에 없는 내용을 추가 생성(환각)
 
-2) executive_summary
-- position: “현재 포지션을 입시 의사결정 관점으로” 1~2문장 진단함.
-  - 예: “영어 2등급은 특정 대학군에서 감점 리스크로 작동함. 정시축을 확보하되 상향 지원은 조건부로 설계함.” 같은 방식
-- solutions: 정확히 3개 처방을 제시함.
-  - 각 솔루션은 ‘행동+판단기준/조건’이 포함된 처방문으로 작성함.
-  - 종결은 보고서체(필요함/권장함/~로 수립함/~로 타겟팅함)로 작성함.
+────────────────────────────
+[삭제 허용 범위: 아래만 삭제 가능]
+────────────────────────────
+삭제는 오직 다음 항목에 한해 허용됨(그 외 삭제 금지):
+- 인사/의례 멘트(안녕하세요, 들어오세요 등)
+- 광고/채널 멘트(구독/좋아요/홍보)
+- 의미 없는 추임새(음/어/그/막 등) 및 발화 끊김 표현
+- 같은 문장이 연속으로 2회 이상 반복되는 ‘명백한 중복’(단, 내용/근거가 조금이라도 다르면 삭제 금지)
 
-3) detailed_notes (중요)
-- 소주제 최대 5개로 제한함. (최대이기 때문에 문맥상 소주제가 적다면 적은 형태로 적용. 너무 흩어지지 않도록 조절)
-- 요약 금지임. 다만 “회의록처럼 대화 재현”은 금지임.
-- 상담에서 나온 내용을 “입시 판단 포인트(유불리/리스크/조건/대안/카드 구성)” 기준으로 재구성하여 구체적으로 적용해야함.
-- 다음을 우선 포함함:
-  - 지원 가능/불가 판단의 근거
-  - 리스크 요인(감점, 반영비, 변표 등)과 대응
-  - 지원 카드 조합(상향/적정/안정) 또는 제외 전략
-  - 확인해야 할 추가 변수(추정 불가한 부분은 ‘추정 불가함’으로 명시)
-  - 학생 관리 관련 조언
-- 중요: 요약이 아닌, 문맥상 내용을 가져오는 형태로 해야함. 단순 요약은 금지.
-- 금지: 감정/상담장 분위기/대화 흐름 묘사, “학생은 ~했다” 반복, “~로 평가됨/권장됨” 남발, 단순 요약은 금지
-- 목표는 “요약”이 아니라 “문맥을 엮어 상세히 정리”임.
-- 소주제(title)는 transcript의 논점 수에 맞춰 2~5개로 선택함.
-  - 논점이 적으면 2~3개만 생성함.
-  - 억지로 5개를 채우지 않음.
-- 각 소주제 content는 원칙적으로 최소 800자 이상으로 상세히 작성함.
-- 문단 구분을 사용하여 읽기 쉽게 작성하되, 같은 의미 반복으로 분량을 늘리지 않음.
+────────────────────────────
+[길이 강제 조건: 원문 대비 85% 이상]
+────────────────────────────
+- detailed_sections의 모든 content를 합친 총 글자 수는, 주어진 transcript 글자 수 대비 최소 85% 이상이어야 함.
+  - 예: transcript가 4399자이면 상세 content 합계는 최소 3739자 이상이어야 함.
+- 이 조건을 만족하지 못하면 실패로 간주되며, 절대 짧게 쓰지 말 것.
+- 길이를 맞추기 위해 같은 말을 반복해서 늘리지 말 것. ‘원문 내용을 보존’하여 길이를 유지할 것.
 
-[문체 예시(진단서 톤)]
-- “영어 2등급은 연세대 라인에서 감점 리스크로 작동함.”
-- “서강대 사회과학부는 적정 카드로 배치함.”
-- “성균관대는 우선 제외 전략으로 설정함.”
-- “변환표준점수 확인 전까지 최종 원서 조합은 확정 불가함.”
+────────────────────────────
+[작업 방식(알고리즘): “원문 보존 편집”]
+────────────────────────────
+1) 원문 내용을 가능한 한 그대로 유지하되, 문장부호/띄어쓰기/맞춤법만 교정함.
+2) 문단을 나누어 읽기 좋게 정렬함.
+3) 내용의 주제 전환 지점에서 섹션을 나눔. (섹션 개수는 고정하지 않음)
+4) 각 섹션 content는 ‘원문에 가까운 문장들’을 중심으로 구성함.
+   - 원문 문장을 재작성해 요약하지 말고, 원문 표현을 다듬는 수준으로 유지함.
+   - 원문에 있는 질문-답변 흐름, 수치 나열, 대학/전형 리스트는 보존함.
+
+────────────────────────────
+[summary_blocks 규칙(2~3개)]
+────────────────────────────
+- summary_blocks는 2~3개만 생성한다.
+- 요약이더라도 “근거 없는 결론” 금지.
+- 각 block은 3~6문장 내외로, 결론 + 핵심 근거(수치/조건/리스크)를 포함한다.
+- summary_blocks는 detailed_sections를 줄여 적는 곳이 아니라, ‘상단 안내 요약’임.
+
+────────────────────────────
+[detailed_sections 규칙]
+────────────────────────────
+- 섹션 제목(title)은 주제 라벨이며 고정 목차 금지. 상담 흐름에 맞춰 자유롭게 생성.
+- 섹션 content는 원문 대부분이 포함되도록 충분히 길게 작성.
+- 숫자/대학명/전형/등급/성적/목표 등은 원문 그대로 보존.
+- 원문에 없는 사실은 추가하지 말 것.
+
+[문체]
+- 보고서체(“~임/~함/~필요함/~권장함”)로 약하게 정리하되, 원문 의미를 바꾸는 재서술(요약) 금지.
+- 가능하면 원문에 가까운 표현을 유지하면서 ‘읽기 좋은 문장’으로만 다듬는다.`;
+const USER_PROMPT_TEMPLATE = `아래 상담 transcript를 바탕으로 “자세한 상담 보고서(상세본)” JSON을 생성하라.
+
+중요:
+- 요약/축약을 절대 하지 말고, 편집(맞춤법/문장부호/문단 정리/추임새 제거)만 수행하라.
+- 삭제는 인사/광고/추임새/명백한 연속 중복만 허용된다.
+- detailed_sections의 전체 content 합계 글자 수는 transcript 글자 수의 85% 이상이 되어야 한다.
+- 상담에 나온 대학/전형/성적/수치/전략/질문-답변 흐름은 그대로 보존하라.
 
 [Transcript]
 {{TRANSCRIPT}}`;
@@ -106,32 +108,119 @@ function validateReportJson(obj) {
         return false;
     const o = obj;
     const meta = o.meta;
-    if (!meta || meta.version !== 3 || meta.language !== "ko")
+    if (!meta || meta.version !== 2 || meta.language !== "ko")
         return false;
-    const statusAnalysis = o.status_analysis;
-    if (!statusAnalysis || typeof statusAnalysis.content !== "string")
+    const summaryBlocks = o.summary_blocks;
+    if (!Array.isArray(summaryBlocks) || summaryBlocks.length < 2 || summaryBlocks.length > 3)
         return false;
-    const execSummary = o.executive_summary;
-    if (!execSummary || typeof execSummary.position !== "string")
-        return false;
-    const solutions = execSummary.solutions;
-    if (!Array.isArray(solutions) || solutions.length !== 3)
-        return false;
-    if (solutions.some((s) => typeof s !== "string"))
-        return false;
-    const detailedNotes = o.detailed_notes;
-    if (!Array.isArray(detailedNotes) || detailedNotes.length < 1 || detailedNotes.length > 5)
-        return false;
-    for (const note of detailedNotes) {
-        if (!note || typeof note !== "object")
+    for (const block of summaryBlocks) {
+        if (!block || typeof block !== "object")
             return false;
-        const n = note;
-        if (typeof n.title !== "string" || typeof n.content !== "string")
+        const b = block;
+        if (typeof b.title !== "string" || typeof b.content !== "string")
+            return false;
+    }
+    const detailedSections = o.detailed_sections;
+    if (!Array.isArray(detailedSections) || detailedSections.length < 2)
+        return false;
+    for (const section of detailedSections) {
+        if (!section || typeof section !== "object")
+            return false;
+        const s = section;
+        if (typeof s.title !== "string" || typeof s.content !== "string")
+            return false;
+        const content = s.content;
+        if (content.length < MIN_DETAILED_SECTION_CONTENT_LENGTH)
             return false;
     }
     return true;
 }
-async function callOpenAI(transcript) {
+function extractDetailedTextAndSectionCount(obj) {
+    if (!obj || typeof obj !== "object") {
+        return { detailedText: "", detailedSectionsCount: null };
+    }
+    const o = obj;
+    const detailedSections = o.detailed_sections;
+    if (Array.isArray(detailedSections)) {
+        const sections = detailedSections
+            .filter((s) => !!s && typeof s === "object")
+            .map((s) => (typeof s.content === "string" ? s.content : ""))
+            .filter(Boolean);
+        return {
+            detailedText: sections.join("\n\n"),
+            detailedSectionsCount: detailedSections.length,
+        };
+    }
+    const detailedReport = o.detailed_report;
+    if (typeof detailedReport === "string") {
+        return { detailedText: detailedReport, detailedSectionsCount: null };
+    }
+    // v3 호환
+    const detailedNotes = o.detailed_notes;
+    if (Array.isArray(detailedNotes)) {
+        const notes = detailedNotes
+            .filter((n) => !!n && typeof n === "object")
+            .map((n) => (typeof n.content === "string" ? n.content : ""))
+            .filter(Boolean);
+        return { detailedText: notes.join("\n\n"), detailedSectionsCount: null };
+    }
+    return { detailedText: "", detailedSectionsCount: null };
+}
+function validateCoverageAndLength(transcript, parsed) {
+    const transcriptLength = transcript.length;
+    const { detailedText, detailedSectionsCount } = extractDetailedTextAndSectionCount(parsed);
+    const detailedLength = detailedText.length;
+    const coverageRatio = transcriptLength > 0 ? detailedLength / transcriptLength : 0;
+    if (transcriptLength <= 0) {
+        return {
+            ok: false,
+            detailedLength,
+            transcriptLength,
+            coverageRatio,
+            failureReason: "empty transcript",
+        };
+    }
+    if (coverageRatio < MIN_COVERAGE_RATIO) {
+        return {
+            ok: false,
+            detailedLength,
+            transcriptLength,
+            coverageRatio,
+            failureReason: `coverage too low (${coverageRatio.toFixed(3)} < ${MIN_COVERAGE_RATIO})`,
+        };
+    }
+    // transcript가 매우 짧은 경우에는 고정 최소 길이 가드 적용하지 않음
+    if (transcriptLength >= MIN_DETAILED_TEXT_LENGTH && detailedLength < MIN_DETAILED_TEXT_LENGTH) {
+        return {
+            ok: false,
+            detailedLength,
+            transcriptLength,
+            coverageRatio,
+            failureReason: `detailed text too short (${detailedLength} < ${MIN_DETAILED_TEXT_LENGTH})`,
+        };
+    }
+    if (detailedSectionsCount !== null && detailedSectionsCount < 2) {
+        return {
+            ok: false,
+            detailedLength,
+            transcriptLength,
+            coverageRatio,
+            failureReason: `detailed_sections too few (${detailedSectionsCount} < 2)`,
+        };
+    }
+    return {
+        ok: true,
+        detailedLength,
+        transcriptLength,
+        coverageRatio,
+        failureReason: null,
+    };
+}
+async function callOpenAI(transcript, extraUserInstruction = "") {
+    const userPrompt = buildUserPrompt(transcript);
+    const finalUserPrompt = extraUserInstruction
+        ? `${userPrompt}\n\n${extraUserInstruction}`
+        : userPrompt;
     const url = `${OPENAI_BASE_URL.replace(/\/$/, "")}/chat/completions`;
     const res = await fetch(url, {
         method: "POST",
@@ -143,7 +232,7 @@ async function callOpenAI(transcript) {
             model: OPENAI_MODEL,
             messages: [
                 { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: buildUserPrompt(transcript) },
+                { role: "user", content: finalUserPrompt },
             ],
             response_format: { type: "json_object" },
             temperature: 0.3,
@@ -172,31 +261,49 @@ async function callOpenAI(transcript) {
 }
 /**
  * transcript로부터 report_json 생성. 검증 통과 시 스키마 객체 반환.
- * 파싱/검증 실패 시 1회 재시도(총 2회).
+ * 파싱/검증/길이검증 실패 시 최대 3회 시도.
  */
 async function generateReportJson(transcript) {
     if (!OPENAI_API_KEY) {
         throw new Error("OPENAI_API_KEY is required");
     }
+    const transcriptLength = transcript.length;
     let lastError = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    let lastCoverage = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        const extraInstruction = attempt > 1 ? RETRY_USER_PROMPT_SUFFIX : "";
         try {
-            const parsed = await callOpenAI(transcript);
-            if (validateReportJson(parsed)) {
-                return parsed;
+            const parsed = await callOpenAI(transcript, extraInstruction);
+            if (!validateReportJson(parsed)) {
+                lastError = new Error("schema validation failed");
+                console.warn("[report-generator] attempt validation failed:", "attempt=", attempt, "reason=schema validation failed");
             }
-            lastError = new Error("Schema validation failed");
-            console.warn("[report-generator] schema validation failed, attempt=", attempt);
+            else {
+                const coverage = validateCoverageAndLength(transcript, parsed);
+                lastCoverage = coverage;
+                console.log("[report-generator] attempt metrics:", "attempt=", attempt, "transcriptLen=", coverage.transcriptLength, "detailedLen=", coverage.detailedLength, "coverageRatio=", coverage.coverageRatio.toFixed(3));
+                if (coverage.ok) {
+                    return parsed;
+                }
+                lastError = new Error(coverage.failureReason ?? "coverage validation failed");
+                console.warn("[report-generator] attempt validation failed:", "attempt=", attempt, "reason=", coverage.failureReason ?? "coverage validation failed");
+            }
         }
         catch (e) {
             lastError = e instanceof Error ? e : new Error(String(e));
             console.error("[report-generator] attempt failed:", attempt, lastError.message);
         }
-        if (attempt < 2) {
+        if (attempt < MAX_ATTEMPTS) {
             console.warn("[report-generator] retry after failure, attempt=", attempt);
         }
     }
-    const err = lastError ?? new Error("report generation failed");
+    if (lastCoverage) {
+        const failureMessage = `report generation too short (coverageRatio=${lastCoverage.coverageRatio.toFixed(3)}, detailedLen=${lastCoverage.detailedLength}, transcriptLen=${lastCoverage.transcriptLength})`;
+        console.error("[report-generator] report generation failed:", failureMessage);
+        throw new Error(failureMessage);
+    }
+    const fallbackFailureMessage = `report generation too short (coverageRatio=0.000, detailedLen=0, transcriptLen=${transcriptLength})`;
+    const err = lastError ?? new Error(fallbackFailureMessage);
     console.error("[report-generator] report generation failed:", err.message);
     throw err;
 }

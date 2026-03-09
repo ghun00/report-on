@@ -160,11 +160,14 @@ async function processReport(reportId) {
             catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
                 console.error("[processReport]", reportId, "report generation failed:", msg);
+                const errorMessage = msg.startsWith("report generation too short")
+                    ? msg
+                    : `report generation failed: ${msg.slice(0, 500)}`;
                 await supabase_1.supabase
                     .from("reports")
                     .update({
                     report_json: null,
-                    error_message: `report generation failed: ${msg.slice(0, 500)}`,
+                    error_message: errorMessage,
                 })
                     .eq("id", reportId);
             }

@@ -3,11 +3,17 @@
 import { TOC_SECTIONS } from "./report-json-types";
 import { cn } from "@/lib/utils";
 
+interface TocSection {
+  id: string;
+  label: string;
+}
+
 interface ReportTOCProps {
   activeId: string | null;
   onNav: (id: string) => void;
   fontClassName?: string;
   stickyTop?: string;
+  sections?: readonly TocSection[];
 }
 
 export default function ReportTOC({
@@ -15,6 +21,7 @@ export default function ReportTOC({
   onNav,
   fontClassName = "",
   stickyTop = "12rem",
+  sections = TOC_SECTIONS,
 }: ReportTOCProps) {
   return (
     <aside
@@ -23,7 +30,7 @@ export default function ReportTOC({
     >
       <div className="sticky" style={{ top: stickyTop }}>
         <nav className="flex flex-col gap-1">
-          {TOC_SECTIONS.map((s) => {
+          {sections.map((s) => {
             const isActive = activeId === s.id;
             return (
               <button
