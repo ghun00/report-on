@@ -13,12 +13,23 @@ const supabase_1 = require("./supabase");
 const ncp_raw_client_1 = require("./ncp-raw-client");
 const ncp_storage_1 = require("./ncp-storage");
 const clova_long_1 = require("./clova-long");
-const report_generator_1 = require("./report-generator");
+const text_segmentation_1 = require("./text-segmentation");
+const section_labeler_1 = require("./section-labeler");
+const build_detailed_sections_1 = require("./build-detailed-sections");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 const DELETE_NCP_AFTER_SUCCESS = process.env.DELETE_NCP_AFTER_SUCCESS !== "false";
 const DELETE_NCP_RESULT_AFTER_SUCCESS = process.env.DELETE_NCP_RESULT_AFTER_SUCCESS === "true";
 function getAudioStoragePath(reportId) {
     return `reports/${reportId}/raw.webm`;
+}
+function buildSummaryBlocksFromDetailedSections(sections) {
+    const picked = sections.slice(0, 3);
+    if (picked.length === 0)
+        return [];
+    return picked.map((sec, idx) => ({
+        title: sec.title || `요약 ${idx + 1}`,
+        content: sec.content.slice(0, 360),
+    }));
 }
 /**
  * 1) reports row 조회
@@ -120,7 +131,7 @@ async function processReport(reportId) {
             await updateReportFailed(reportId, `db update: ${msg}`);
             return;
         }
-        // report_json 생성 (transcript 200자 미만이면 스킵)
+        // report_json 생성 (규칙 기반 상세본)
         if (transcript.length < 200) {
             console.log("[processReport]", reportId, "report generation skipped (transcript length < 200)");
             const { error: skipError } = await supabase_1.supabase
@@ -136,7 +147,17 @@ async function processReport(reportId) {
         else {
             console.log(`[processReport] ${reportId} report generation start, transcript length=${transcript.length}`);
             try {
-                const reportJson = await (0, report_generator_1.generateReportJson)(transcript);
+                const normalized = (0, text_segmentation_1.normalizeTranscript)(transcript);
+                const sentences = (0, text_segmentation_1.splitIntoSentencesKorean)(normalized);
+                const { sections: labeledSections, chunkCount } = await (0, section_labeler_1.labelSectionsWithLLM)(sentences);
+                const detailedSections = (0, build_detailed_sections_1.buildDetailedSections)(sentences, labeledSections);
+                const coverage = (0, build_detailed_sections_1.computeDetailedCoverageRatio)(normalized, detailedSections);
+                console.log("[processReport] rule-based report metrics:", "sentenceCount=", sentences.length, "sectionCount=", detailedSections.length, "chunkCount=", chunkCount, "coverageRatio=", coverage.ratio.toFixed(3), "detailedLen=", coverage.detailedLength, "transcriptLen=", coverage.transcriptLength);
+                const reportJson = {
+                    meta: { version: 10, language: "ko", mode: "rule_based_sections" },
+                    summary_blocks: buildSummaryBlocksFromDetailedSections(detailedSections),
+                    detailed_sections: detailedSections,
+                };
                 const { error: reportUpdateError } = await supabase_1.supabase
                     .from("reports")
                     .update({
@@ -160,9 +181,7 @@ async function processReport(reportId) {
             catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
                 console.error("[processReport]", reportId, "report generation failed:", msg);
-                const errorMessage = msg.startsWith("report generation too short")
-                    ? msg
-                    : `report generation failed: ${msg.slice(0, 500)}`;
+                const errorMessage = `report generation failed: ${msg.slice(0, 500)}`;
                 await supabase_1.supabase
                     .from("reports")
                     .update({

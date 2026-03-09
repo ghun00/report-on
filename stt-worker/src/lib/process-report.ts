@@ -12,15 +12,38 @@ import {
   deleteNcpResultKey,
 } from "./ncp-storage";
 import { createClovaLongJob, pollClovaResult } from "./clova-long";
-import { generateReportJson } from "./report-generator";
+import { normalizeTranscript, splitIntoSentencesKorean } from "./text-segmentation";
+import { labelSectionsWithLLM } from "./section-labeler";
+import {
+  buildDetailedSections,
+  computeDetailedCoverageRatio,
+  type DetailedSection,
+} from "./build-detailed-sections";
 
 const execFileAsync = promisify(execFile);
 
 const DELETE_NCP_AFTER_SUCCESS = process.env.DELETE_NCP_AFTER_SUCCESS !== "false";
 const DELETE_NCP_RESULT_AFTER_SUCCESS = process.env.DELETE_NCP_RESULT_AFTER_SUCCESS === "true";
 
+interface RuleBasedReportJsonV10 {
+  meta: { version: 10; language: "ko"; mode: "rule_based_sections" };
+  summary_blocks: Array<{ title: string; content: string }>;
+  detailed_sections: DetailedSection[];
+}
+
 function getAudioStoragePath(reportId: string): string {
   return `reports/${reportId}/raw.webm`;
+}
+
+function buildSummaryBlocksFromDetailedSections(
+  sections: DetailedSection[]
+): Array<{ title: string; content: string }> {
+  const picked = sections.slice(0, 3);
+  if (picked.length === 0) return [];
+  return picked.map((sec, idx) => ({
+    title: sec.title || `요약 ${idx + 1}`,
+    content: sec.content.slice(0, 360),
+  }));
 }
 
 /**
@@ -133,7 +156,7 @@ export async function processReport(reportId: string): Promise<void> {
       return;
     }
 
-    // report_json 생성 (transcript 200자 미만이면 스킵)
+    // report_json 생성 (규칙 기반 상세본)
     if (transcript.length < 200) {
       console.log("[processReport]", reportId, "report generation skipped (transcript length < 200)");
       const { error: skipError } = await supabase
@@ -145,9 +168,38 @@ export async function processReport(reportId: string): Promise<void> {
         .eq("id", reportId);
       if (skipError) console.error("[processReport] update report_json skip error:", skipError);
     } else {
-      console.log(`[processReport] ${reportId} report generation start, transcript length=${transcript.length}`);
+      console.log(
+        `[processReport] ${reportId} report generation start, transcript length=${transcript.length}`
+      );
       try {
-        const reportJson = await generateReportJson(transcript);
+        const normalized = normalizeTranscript(transcript);
+        const sentences = splitIntoSentencesKorean(normalized);
+        const { sections: labeledSections, chunkCount } = await labelSectionsWithLLM(sentences);
+        const detailedSections = buildDetailedSections(sentences, labeledSections);
+        const coverage = computeDetailedCoverageRatio(normalized, detailedSections);
+
+        console.log(
+          "[processReport] rule-based report metrics:",
+          "sentenceCount=",
+          sentences.length,
+          "sectionCount=",
+          detailedSections.length,
+          "chunkCount=",
+          chunkCount,
+          "coverageRatio=",
+          coverage.ratio.toFixed(3),
+          "detailedLen=",
+          coverage.detailedLength,
+          "transcriptLen=",
+          coverage.transcriptLength
+        );
+
+        const reportJson: RuleBasedReportJsonV10 = {
+          meta: { version: 10, language: "ko", mode: "rule_based_sections" },
+          summary_blocks: buildSummaryBlocksFromDetailedSections(detailedSections),
+          detailed_sections: detailedSections,
+        };
+
         const { error: reportUpdateError } = await supabase
           .from("reports")
           .update({
@@ -169,9 +221,7 @@ export async function processReport(reportId: string): Promise<void> {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         console.error("[processReport]", reportId, "report generation failed:", msg);
-        const errorMessage = msg.startsWith("report generation too short")
-          ? msg
-          : `report generation failed: ${msg.slice(0, 500)}`;
+        const errorMessage = `report generation failed: ${msg.slice(0, 500)}`;
         await supabase
           .from("reports")
           .update({

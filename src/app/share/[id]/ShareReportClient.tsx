@@ -63,7 +63,7 @@ function parseShareReportJson(raw: unknown): NormalizedReport | null {
   let summaryBlocks: Array<{ title: string; content: string }> = [];
   let detailedSections: Array<{ title: string; content: string }> = [];
 
-  if (version === 2 && Array.isArray(obj.summary_blocks) && Array.isArray(obj.detailed_sections)) {
+  if ((version === 2 || version === 10) && Array.isArray(obj.summary_blocks) && Array.isArray(obj.detailed_sections)) {
     summaryBlocks = obj.summary_blocks.filter(
       (b) => b && typeof b.title === "string" && typeof b.content === "string"
     );
