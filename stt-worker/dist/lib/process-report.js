@@ -150,11 +150,16 @@ async function processReport(reportId) {
                 const normalized = (0, text_segmentation_1.normalizeTranscript)(transcript);
                 const sentences = (0, text_segmentation_1.splitIntoSentencesKorean)(normalized);
                 const { sections: labeledSections, chunkCount } = await (0, section_labeler_1.labelSectionsWithLLM)(sentences);
-                const detailedSections = (0, build_detailed_sections_1.buildDetailedSections)(sentences, labeledSections);
+                const { sections: detailedSections, stats: rewriteStats } = await (0, build_detailed_sections_1.buildDetailedSections)(sentences, labeledSections);
                 const coverage = (0, build_detailed_sections_1.computeDetailedCoverageRatio)(normalized, detailedSections);
-                console.log("[processReport] rule-based report metrics:", "sentenceCount=", sentences.length, "sectionCount=", detailedSections.length, "chunkCount=", chunkCount, "coverageRatio=", coverage.ratio.toFixed(3), "detailedLen=", coverage.detailedLength, "transcriptLen=", coverage.transcriptLength);
+                console.log("[processReport] rule-based report metrics:", "sentenceCount=", sentences.length, "sectionCount=", detailedSections.length, "chunkCount=", chunkCount, "coverageRatio=", coverage.ratio.toFixed(3), "detailedLen=", coverage.detailedLength, "transcriptLen=", coverage.transcriptLength, "rewriteEnabled=", rewriteStats.rewriteEnabled, "totalRewriteTimeMs=", rewriteStats.totalRewriteTimeMs, "sectionFallbackCount=", rewriteStats.sectionFallbackCount);
                 const reportJson = {
-                    meta: { version: 10, language: "ko", mode: "rule_based_sections" },
+                    meta: {
+                        version: 10,
+                        language: "ko",
+                        mode: "rule_based_sections",
+                        rewriteEnabled: rewriteStats.rewriteEnabled,
+                    },
                     summary_blocks: buildSummaryBlocksFromDetailedSections(detailedSections),
                     detailed_sections: detailedSections,
                 };

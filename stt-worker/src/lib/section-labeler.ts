@@ -17,19 +17,17 @@ const MAX_SENTENCES_PER_CHUNK = 300;
 const MAX_CHARS_PER_CHUNK = 15000;
 const MAX_LABEL_ATTEMPTS = 2;
 const TITLE_BANNED_RE =
-  /(전반|후반|파트\s*\d+|part\s*\d+|상담\s*내용|기타|종합|일반|섹션\s*\d+)/i;
+  /(전반|후반|파트|part|상담\s*내용|기타|종합|일반|소개|마무리|섹션\s*\d+)/i;
 const TITLE_KEYWORD_RE =
   /(내신|성적|모의고사|최저|생기부|전공|지원|전략|리스크|액션|대학|카드|수능|목표|진단|합격|불합격|상향|하향)/;
 
-function getMinSectionsByTranscriptLength(transcriptLen: number): number {
-  if (transcriptLen >= 7000) return 10;
-  if (transcriptLen >= 4000) return 8;
-  if (transcriptLen >= 2000) return 6;
+function getMinSectionsBySentenceCount(sentenceCount: number): number {
+  if (sentenceCount >= 120) return 10;
+  if (sentenceCount >= 80) return 8;
+  if (sentenceCount >= 40) return 6;
+  if (sentenceCount >= 20) return 5;
+  if (sentenceCount >= 8) return 4;
   return 3;
-}
-
-function calculateTranscriptLength(sentences: string[]): number {
-  return sentences.reduce((acc, s) => acc + s.length, 0);
 }
 
 function createChunks(sentences: string[]): ChunkRange[] {
@@ -269,8 +267,7 @@ export async function labelSectionsWithLLM(sentences: string[]): Promise<{
   sections: LabeledSection[];
   chunkCount: number;
 }> {
-  const transcriptLen = calculateTranscriptLength(sentences);
-  const minSections = getMinSectionsByTranscriptLength(transcriptLen);
+  const minSections = getMinSectionsBySentenceCount(sentences.length);
   const chunks = createChunks(sentences);
   const merged: LabeledSection[] = [];
 

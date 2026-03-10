@@ -26,7 +26,12 @@ const DELETE_NCP_AFTER_SUCCESS = process.env.DELETE_NCP_AFTER_SUCCESS !== "false
 const DELETE_NCP_RESULT_AFTER_SUCCESS = process.env.DELETE_NCP_RESULT_AFTER_SUCCESS === "true";
 
 interface RuleBasedReportJsonV10 {
-  meta: { version: 10; language: "ko"; mode: "rule_based_sections" };
+  meta: {
+    version: 10;
+    language: "ko";
+    mode: "rule_based_sections";
+    rewriteEnabled: boolean;
+  };
   summary_blocks: Array<{ title: string; content: string }>;
   detailed_sections: DetailedSection[];
 }
@@ -175,7 +180,10 @@ export async function processReport(reportId: string): Promise<void> {
         const normalized = normalizeTranscript(transcript);
         const sentences = splitIntoSentencesKorean(normalized);
         const { sections: labeledSections, chunkCount } = await labelSectionsWithLLM(sentences);
-        const detailedSections = buildDetailedSections(sentences, labeledSections);
+        const { sections: detailedSections, stats: rewriteStats } = await buildDetailedSections(
+          sentences,
+          labeledSections
+        );
         const coverage = computeDetailedCoverageRatio(normalized, detailedSections);
 
         console.log(
@@ -191,11 +199,22 @@ export async function processReport(reportId: string): Promise<void> {
           "detailedLen=",
           coverage.detailedLength,
           "transcriptLen=",
-          coverage.transcriptLength
+          coverage.transcriptLength,
+          "rewriteEnabled=",
+          rewriteStats.rewriteEnabled,
+          "totalRewriteTimeMs=",
+          rewriteStats.totalRewriteTimeMs,
+          "sectionFallbackCount=",
+          rewriteStats.sectionFallbackCount
         );
 
         const reportJson: RuleBasedReportJsonV10 = {
-          meta: { version: 10, language: "ko", mode: "rule_based_sections" },
+          meta: {
+            version: 10,
+            language: "ko",
+            mode: "rule_based_sections",
+            rewriteEnabled: rewriteStats.rewriteEnabled,
+          },
           summary_blocks: buildSummaryBlocksFromDetailedSections(detailedSections),
           detailed_sections: detailedSections,
         };
